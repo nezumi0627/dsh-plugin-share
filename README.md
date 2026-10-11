@@ -23,8 +23,25 @@ loaded normally.
 
 ## Install plugin-share itself
 
-**Prompt A.** Paste this to an agent that has the built-in `plugin_manager` tool
-(any Creator-style preset):
+There is no Share button until plugin-share is installed — the button is a
+contribution of this plugin's browser half, so it cannot exist before the plugin
+does. Installing it is one dialog, and it needs no agent and no preset change.
+
+**The dialog (easiest).** In the Web app, open the sidebar's **Plugins** page and
+press **Add plugin**. DSH accepts a package name, a Git address, a tarball, or an
+absolute local path; paste the release tarball URL:
+
+```text
+https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.0/dsh-plugin-share-0.1.0.tgz
+```
+
+Then **Install**, and **Enable now** when it finishes. Installing a bundle needs
+pnpm and, if the profile's package has install scripts, a second approval the
+dialog offers itself.
+
+**Prompt A (agent side).** The same install through the built-in `plugin_manager`
+tool, for a session that has one — a Creator-style preset, which is where DSH
+enables that tool:
 
 ```text
 Install the DSH plugin "dsh-plugin-share" from this release tarball using the
@@ -42,17 +59,13 @@ If the release asset is unavailable, the same tag installs from git:
 ... instead of the .tgz URL, use this spec: git+https://github.com/nezumi0627/dsh-plugin-share#v0.1.0
 ```
 
-If the agent has no `plugin_manager` tool, it cannot install a bundle either: DSH
-ships that tool disabled by default and switches it on in the **Cordis** agent
-preset (`tool-plugin-manager` is `disabled: true` in the Web app's patch, and the
-Cordis preset re-enables it as `@deepseek-ai/dsh-plugin-manager/tools`). Start the
-session in that preset — or add that module to the preset you use — and retry
-Prompt A. The install itself needs `danger-full-access`, because it changes the
-profile for every session, and the installed Host code then runs in the desktop
-process.
-
-The sidebar's **Plugins** page, where the Share button below appears, comes from
-the Web app bundle and is on by default.
+`plugin_manager` is disabled by default (`tool-plugin-manager` is `disabled: true`
+in the Web app's patch) and the **Cordis** agent preset is what re-enables it as
+`@deepseek-ai/dsh-plugin-manager/tools`. If a session has no `plugin_manager` tool,
+either start it in that preset or use the dialog above instead — the dialog is the
+same host code path, with the profile manager's own UI on top. The agent route also
+needs `danger-full-access`, because installing a bundle changes the profile for
+every session and the installed Host code then runs in the desktop process.
 
 Two things to know about this one step:
 
@@ -60,8 +73,9 @@ Two things to know about this one step:
   verification — plugin-share cannot install itself before it exists. The trust
   anchor is the release asset itself: HTTPS from GitHub, at a tag, with the digest
   published next to it.
-- After the install, `plugin_share` may not appear in the current session's tool
-  list yet. **Restart DSH** and it will.
+- The browser half may load as soon as the profile recomposes, and the Share button
+  appears on each bundle's page in **Plugins**. If it does not, **restart DSH**;
+  a fresh session is also when `plugin_share` joins the agent's tool list.
 
 ## Share your own plugin
 

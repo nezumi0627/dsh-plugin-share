@@ -160,7 +160,17 @@ These need a live DSH profile, and the session that wrote this had no
 
 ### Finishing (6.1)
 
-In a DSH session that has `plugin_manager`, paste Prompt A from the README:
+Install plugin-share itself, either way round. First check whether it is already
+there: the profile lists it in `dsh.profile.bundles`, and the sidebar's Plugins
+page shows it under **Installed**. (A Share button cannot exist before this step —
+the button is this plugin's own browser half. Verified 2026-10-11: the desktop
+profile did not hold the bundle, which is why no button appeared.)
+
+The dialog needs no agent: sidebar **Plugins** → **Add plugin** → the release
+tarball URL below → **Install** → **Enable now**.
+
+An agent does it with `plugin_manager`, which is enabled in a Creator-style
+preset (the **Cordis** preset):
 
 ```text
 Install the DSH plugin "dsh-plugin-share" from this release tarball using the
@@ -173,8 +183,9 @@ https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.0/dsh-plug
 ```
 
 Then restart DSH, and ask for `plugin_share` with `action: list`. Success is:
-the bundle in `list_bundles`, the tool answering, and `plugin_share inspect` of
-this repository reporting the digest recorded in its `plugin-share.json`.
+the bundle in `list_bundles`, the tool answering, the **Share** control on each
+bundle's page in **Plugins**, and `plugin_share inspect` of this repository
+reporting the digest recorded in its `plugin-share.json`.
 
 ### The field test, ready to run (6.2)
 
