@@ -283,6 +283,62 @@ test('a local directory source is refused with a hint to pack it', async () => {
   assert.match(result.message, /pack/);
 });
 
+test('a tarball that would not load as a bundle is refused', async () => {
+  const root = await makeStoreRoot();
+  const plain = writeTarball(
+    [
+      { name: 'package/package.json', data: Buffer.from('{"name":"x-demo","version":"1.0.0"}') },
+      { name: 'package/index.js', data: Buffer.from('export function apply() {}\n') },
+    ],
+    { mtimeMs: 0 },
+  );
+  const withoutPatch = await installShare('https://example.com/x-demo-1.0.0.tgz', {
+    installer: makeInstaller(),
+    root,
+    fetchImpl: fakeFetch({ 'https://example.com/x-demo-1.0.0.tgz': plain }),
+    sha256: sha256Hex(plain),
+  });
+  assert.equal(withoutPatch.ok, false);
+  assert.equal(withoutPatch.code, 'not-a-bundle');
+  assert.match(withoutPatch.message, /dsh\.bundle\.patch/);
+
+  const missingPatchFile = writeTarball(
+    [
+      {
+        name: 'package/package.json',
+        data: Buffer.from('{"name":"x-demo","version":"1.0.0","dsh":{"bundle":{"patch":"./cordis.patch.yml"}}}'),
+      },
+      { name: 'package/index.js', data: Buffer.from('export function apply() {}\n') },
+    ],
+    { mtimeMs: 0 },
+  );
+  const absent = await installShare('https://example.com/x-demo-1.0.0.tgz', {
+    installer: makeInstaller(),
+    root,
+    fetchImpl: fakeFetch({ 'https://example.com/x-demo-1.0.0.tgz': missingPatchFile }),
+    sha256: sha256Hex(missingPatchFile),
+  });
+  assert.equal(absent.ok, false);
+  assert.equal(absent.code, 'not-a-bundle');
+  assert.match(absent.message, /package\/cordis\.patch\.yml/);
+  assert.deepEqual(await readInstalled({ root }), []);
+});
+
+test('inspectShare refuses a non-bundle tarball before installing anything', async () => {
+  const plain = writeTarball(
+    [
+      { name: 'package/package.json', data: Buffer.from('{"name":"x-demo","version":"1.0.0"}') },
+    ],
+    { mtimeMs: 0 },
+  );
+  const result = await inspectShare('https://example.com/x-demo-1.0.0.tgz', {
+    fetchImpl: fakeFetch({ 'https://example.com/x-demo-1.0.0.tgz': plain }),
+    sha256: sha256Hex(plain),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'not-a-bundle');
+});
+
 test('a missing manifest is reported as an error, not a crash', async () => {
   const root = await makeStoreRoot();
   const result = await installShare(SOURCE, {
