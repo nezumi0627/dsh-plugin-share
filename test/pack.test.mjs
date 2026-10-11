@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { validateManifest, defaultArtifactUrl } from '../lib/manifest.js';
@@ -145,4 +145,36 @@ test('created defaults to the git commit date when the directory is a repository
   const result = await packDirectory(dir, { owner: 'o', repo: 'r' });
   assert.equal(result.repoManifest.created, '2026-01-02T03:04:05+09:00');
   return undefined;
+});
+
+test('a name or version that is not one path segment is refused before writing', async () => {
+  for (const extra of [
+    { name: '..\\..\\..\\escaped' },
+    { name: '../../escaped' },
+    { name: 'C:\\Windows\\evil' },
+    { version: '../../../../escaped' },
+    { version: '1.0.0/../../x' },
+  ]) {
+    const dir = await makePlugin({ extra });
+    await assert.rejects(() => packDirectory(dir, { owner: 'o', repo: 'r' }), /pack: package\.json (name|version) is not a valid/, JSON.stringify(extra));
+  }
+  // A scope is still flattened, not refused.
+  const scoped = await makePlugin({ extra: { name: '@local/x-demo' } });
+  const result = await packDirectory(scoped, { owner: 'o', repo: 'r', created: '2026-10-11T00:00:00.000Z' });
+  assert.equal(basename(result.tarballPath), 'local-x-demo-1.0.0.tgz');
+});
+
+test('packing refuses a link instead of publishing what it points at', async () => {
+  const outside = await mkdtemp(join(tmpdir(), 'plugin-share-outside-'));
+  await writeFile(join(outside, 'secret.txt'), 'TOP-SECRET-TOKEN');
+
+  const linkedFile = await makePlugin();
+  await symlink(join(outside, 'secret.txt'), join(linkedFile, 'notes.txt'), 'file');
+  await assert.rejects(() => packDirectory(linkedFile, { owner: 'o', repo: 'r' }), /symbolic link/);
+
+  // A directory link (a Windows junction needs no special rights) is refused too,
+  // rather than walked into its target or around a loop.
+  const linkedDir = await makePlugin();
+  await symlink(outside, join(linkedDir, 'vendor'), 'junction');
+  await assert.rejects(() => packDirectory(linkedDir, { owner: 'o', repo: 'r' }), /symbolic link/);
 });
