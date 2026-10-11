@@ -1,17 +1,17 @@
 {
   "share": 1,
   "name": "dsh-plugin-share",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "author": {
     "name": "nezumi0627",
     "github": "nezumi0627"
   },
-  "created": "2026-10-12T00:00:00+09:00",
+  "created": "2026-10-11T23:58:00+09:00",
   "artifact": {
     "format": "tgz",
-    "sha256": "2579b46a4ac8f7cb1652f384015811b25b7af077bed417bbf97276679e9967dd",
-    "url": "https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.2/dsh-plugin-share-0.1.2.tgz",
-    "bytes": 99283
+    "sha256": "0d5cf6337c5dae30511991a611a1ca1b3f5a59ecb02f3b1eac3e963c6c1bd7bd",
+    "url": "https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.3/dsh-plugin-share-0.1.3.tgz",
+    "bytes": 100227
   },
   "summary": "Share DSH plugins by URL: a manifest format, a packer, and an installer that verifies sha256 before the profile installs a tarball.",
   "license": "MIT"
