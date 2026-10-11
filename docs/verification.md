@@ -8,23 +8,26 @@ Windows, Node v24.14.0, pnpm 11.7.0, `gh` authenticated as `nezumi0627`,
 
 ```text
 $ node --test
-ℹ tests 130
-ℹ pass 130
+ℹ tests 150
+ℹ pass 150
 ℹ fail 0
 ```
 
-(as of commit `f32f139`, the commit tag `v0.1.0` points at)
+(as of the tree tag `v0.1.1` points at; run `node --test` to reproduce)
 
 Covered: manifest validation for both forms (schema required fields are asserted
 to be exactly the ones the validator enforces), tarball read/write round-trips
-against the npm format, reading safety (absolute names, `..`, links, caps),
+against the npm format, reading safety (absolute names, `..`, backslashes,
+duplicate names, links, directory entries, the inflate bound, the caps),
 sha256 digests, source parsing for every input form, redirect and size limits in
-the fetcher, the store and the ledger, every install path with a fake installer
-(digest match, digest mismatch, bare URL without a digest, manifest/tarball
-disagreement, a tarball that would not load as a bundle, build approval
-round-trip, replacement, refusal), the `plugin_share` tool's five actions and its
-`danger-full-access` refusal, the CLI, the publish planner, and the web host and
-client halves with a fake web server and a fake React.
+the fetcher (the first request included), the store and the ledger, every install
+path with a fake installer (digest match, digest mismatch, bare URL without a
+digest, manifest/tarball disagreement, a tarball that would not load as a bundle,
+build approval round-trip, replacement, refusal, and the artifact a refusal
+removes), the `plugin_share` tool's five actions and its `danger-full-access`
+refusal, the CLI, the publish planner (including a reproducible pack and the
+refusal to pack through a link), and the web host and client halves with a fake
+web server and a fake React.
 
 ## 2. The release, checked four ways
 
@@ -35,19 +38,19 @@ disagree with itself. Read the digest from there, then check it four ways:
 
 ```text
 $ node bin/plugin-share.mjs pack . --owner nezumi0627 --repo dsh-plugin-share \
-    --created 2026-10-11T23:24:08+09:00 --exclude .superpowers
-packed dsh-plugin-share@0.1.0
+    --created 2026-10-11T23:46:00+09:00 --exclude .superpowers
+packed dsh-plugin-share@0.1.1
 sha256 <written into plugin-share.json>
 bytes <same file>
 
-$ (Get-FileHash dist\dsh-plugin-share-0.1.0.tgz -Algorithm SHA256).Hash
+$ (Get-FileHash dist\dsh-plugin-share-0.1.1.tgz -Algorithm SHA256).Hash
 <plugin-share.json's artifact.sha256>
 
-$ gh release view v0.1.0 --json assets
+$ gh release view v0.1.1 --json assets
 "digest": "sha256:<the same>"
 "size": <artifact.bytes>
 
-$ curl -sL -o curl.tgz https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.0/dsh-plugin-share-0.1.0.tgz
+$ curl -sL -o curl.tgz https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.1/dsh-plugin-share-0.1.1.tgz
 <the same digest, and artifact.bytes bytes>
 ```
 
@@ -56,33 +59,35 @@ digest, and a fresh download of the release asset.
 
 `--created` is passed explicitly because `pack` otherwise reads it from the
 directory's commit date (format.md §1.1), which would make the digest change with
-any later commit. The release was packed from commit `d2e4df1`, so that date plus
-that tree is what reproduces the published bytes.
+any later commit. The published bytes are the packed files of the tree at tag
+`v0.1.1`; the tag itself also records the digest in `plugin-share.json`, which
+`pack` excludes, so the tagged tree and the artifact still describe one tree.
+`--exclude .superpowers` keeps the agent's working directory out.
+
+The tarball holds 49 entries: every source file plus `package/plugin-share.json`
+(the embedded manifest). It contains no `.superpowers/` working directory, no
+`dist/`, and no `node_modules`.
 
 The 0.1.0 asset was replaced once, after the installer-result fix (commit
 `c6f87b6`): the first build's digest identified bytes that would have reported a
 successful profile install as a failure, so it was withdrawn rather than left as
-the recommended artifact.
+the recommended artifact. 0.1.1 is the review response in §7; the manifest format
+is unchanged, so `share` stays `1`.
 
-The tarball holds 40 entries: every source file plus `package/plugin-share.json`
-(the embedded manifest). It contains no `.superpowers/` working directory, no
-`dist/`, and no `node_modules`.
-
-`git rev-parse v0.1.0` → `f32f139…`, the same commit that was packed, so the tag
-and the published bytes describe one tree.
+`git rev-parse v0.1.1` names the commit whose packed files the release carries.
 
 ## 3. pnpm accepts the tarball
 
 Run in a throwaway workspace under `%TEMP%`, not in the live profile:
 
 ```text
-$ node <…>/pnpm.mjs add "file:C:/…/dist/dsh-plugin-share-0.1.0.tgz" --dir %TEMP%\ps-pnpm
+$ node <…>/pnpm.mjs add "file:C:/…/dist/dsh-plugin-share-0.1.1.tgz" --dir %TEMP%\ps-pnpm
 Packages: +1
-+ dsh-plugin-share 0.1.0
++ dsh-plugin-share 0.1.1
 Done in 945ms using pnpm v11.7.0
 ```
 
-- `package.json` afterwards: `"dsh-plugin-share": "file:C:/…/dist/dsh-plugin-share-0.1.0.tgz"` —
+- `package.json` afterwards: `"dsh-plugin-share": "file:C:/…/dist/dsh-plugin-share-0.1.1.tgz"` —
   pnpm records the `file:` spec **verbatim, absolute and with forward slashes**.
   That answers the design's open question about `profileSpec`: `toPnpmSpec()`'s
   output is what the profile will carry.
@@ -179,7 +184,7 @@ Make sure it appears in list_bundles and that a plugin_share tool becomes
 available. If it does not, tell me what is missing instead of installing
 anything else.
 
-https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.0/dsh-plugin-share-0.1.0.tgz
+https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.1/dsh-plugin-share-0.1.1.tgz
 ```
 
 Then restart DSH, and ask for `plugin_share` with `action: list`. Success is:
@@ -228,3 +233,33 @@ each time: restart DSH, open the sidebar's **Plugins** page, pick
 count, size, sha256, repository), choose public or private, and press **Publish**.
 Success is a repository with a `v0.1.0` tag, a release carrying the `.tgz`, and a
 panel showing the URL that `plugin_share install` accepts.
+
+## 7. The adversarial review, and what it changed
+
+A second agent read this repository read-only and attacked it with its own scripts
+before 0.1.1 was cut. It reported ten issues; all ten are fixed in 0.1.1, each with
+a test of its own:
+
+| # | What was wrong before the fix | Fix |
+| --- | --- | --- |
+| 1 | `gunzipSync` had no output bound, so a 1 MB input could ask for gigabytes before a single cap was compared, and every entry read re-inflated the archive | the inflate itself is bounded, and one parse is reused per input |
+| 2 | A directory entry (`typeflag 5`) was skipped before its name was checked | every entry is name-checked, directories included |
+| 3 | A name with a backslash passed the `/`-based traversal check | a backslash is refused |
+| 4 | `artifactFileName()` built an output path from an unvalidated `package.json` name/version | both are validated before anything is written |
+| 5 | The panel's digest came from a second pack, so a directory that is not a git repository answered 409 on every honest publish | the plan's `created` value is reused for its publish; `pack` warns when it is not reproducible |
+| 6 | `pack` followed a symlink or junction and published its target | links are refused via `lstat` |
+| 7 | Two entries with one name could be read as one thing and extracted as another | duplicate entry names are refused |
+| 8 | Only redirects were checked for https; a manifest's own `artifact.url` was fetched whatever its scheme | the first request is checked too (`allowInsecure` is for a local test server) |
+| 9 | A refused install left the artifact it had just written | that one file is removed |
+| 10 | `/publish` accepted a request with no digest, compared the token with `===`, and kept every job forever | the digest is required, the compare is constant time, settled jobs are pruned |
+
+The same review verified these as clean, with its own scripts and transcripts: the
+digest is computed before anything is stored or installed and a mismatch leaves no
+trace; the installer is never handed a URL; the `danger-full-access` refusal is
+fail-closed (20 cases); the Web token is not leaked and answers 403 without it;
+store paths cannot be traversed; hostile embedded manifests are refused.
+
+One limit of that review: the environment had no `pnpm`, so what an *extractor*
+does with a hostile archive (findings 2, 3 and 7) was inferred from the format
+rather than executed. The reader refuses those archives outright, which is what the
+tests now pin.

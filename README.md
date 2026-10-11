@@ -32,7 +32,7 @@ press **Add plugin**. DSH accepts a package name, a Git address, a tarball, or a
 absolute local path; paste the release tarball URL:
 
 ```text
-https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.0/dsh-plugin-share-0.1.0.tgz
+https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.1/dsh-plugin-share-0.1.1.tgz
 ```
 
 Then **Install**, and **Enable now** when it finishes. Installing a bundle needs
@@ -50,13 +50,13 @@ Make sure it appears in list_bundles and that a plugin_share tool becomes
 available. If it does not, tell me what is missing instead of installing
 anything else.
 
-https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.0/dsh-plugin-share-0.1.0.tgz
+https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.1/dsh-plugin-share-0.1.1.tgz
 ```
 
 If the release asset is unavailable, the same tag installs from git:
 
 ```text
-... instead of the .tgz URL, use this spec: git+https://github.com/nezumi0627/dsh-plugin-share#v0.1.0
+... instead of the .tgz URL, use this spec: git+https://github.com/nezumi0627/dsh-plugin-share#v0.1.1
 ```
 
 `plugin_manager` is disabled by default (`tool-plugin-manager` is `disabled: true`
@@ -194,7 +194,7 @@ sent, a digest that matches the files as they are right now.
 
 ## Status
 
-Version `0.1.0`. The format is `share: 1` and is documented in
+Version `0.1.1`. The format is `share: 1` and is documented in
 [`docs/format.md`](docs/format.md); it is deliberately conservative, and a
 breaking change bumps `share` rather than silently changing meaning.
 
