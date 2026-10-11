@@ -1,0 +1,16 @@
+{
+  "name": "dsh-plugin-share-demo-dep",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The same throwaway plugin, declaring one real registry dependency so dependency resolution can be proven",
+  "type": "module",
+  "license": "MIT",
+  "dependencies": {
+    "ms": "^2.1.3"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

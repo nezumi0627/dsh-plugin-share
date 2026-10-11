@@ -1,0 +1,3 @@
+- insert:
+    - id: share-demo-dep
+      name: 'dsh-plugin-share-demo-dep'

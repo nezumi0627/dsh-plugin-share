@@ -1,0 +1,13 @@
+{
+  "name": "dsh-plugin-share-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A throwaway DSH plugin used to prove plugin-share end to end",
+  "type": "module",
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

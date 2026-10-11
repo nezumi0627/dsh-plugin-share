@@ -160,3 +160,45 @@ https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.0/dsh-plug
 Then restart DSH, and ask for `plugin_share` with `action: list`. Success is:
 the bundle in `list_bundles`, the tool answering, and `plugin_share inspect` of
 this repository reporting the sha256 above.
+
+### The field test, ready to run (6.2)
+
+Two throwaway plugins are committed under `fixtures/` for exactly this, and both
+are already packed:
+
+```text
+fixtures/demo-plugin/                        dsh-plugin-share-demo          (no dependencies)
+fixtures/demo-plugin-with-dependency/        dsh-plugin-share-demo-dep      (depends on ms ^2.1.3)
+```
+
+In a session where `plugin_manager` and `plugin_share` are both available:
+
+```text
+1. plugin_share  inspect the absolute path to fixtures/demo-plugin/dist/dsh-plugin-share-demo-0.1.0.tgz
+2. plugin_share  install that same path
+3. plugin_share  list
+4. plugin_share  install the absolute path to fixtures/demo-plugin-with-dependency/dist/dsh-plugin-share-demo-dep-0.1.0.tgz
+5. plugin_share  remove dsh-plugin-share-demo
+```
+
+What success looks like:
+
+| Step | Evidence |
+| --- | --- |
+| 1 | `ok: true`, `status: inspected`, the digest of the local file, and a warning that a local file was not checked against a repository manifest |
+| 2 | `ok: true`, `status: installed`, the `.tgz` copied under `$DSH_HOME/plugin-share/artifacts/`, a ledger row, and `dsh-plugin-share-demo` in the profile's `dependencies` **and** `dsh.profile.bundles` |
+| 3 | the entry listed with `inProfile: true`, `state: installed`; `inProfileNotRecorded` empty |
+| 4 | `ms` under the profile's `node_modules`, and the DSH log line `[share-demo-dep] active — ms('2h') is 7200000` |
+| 5 | gone from `dsh.profile.bundles`, `list` no longer showing it, DSH still healthy |
+
+A dependency with install scripts (for example `sharp`) should stop at
+`status: builds-pending`, naming the packages, with nothing built; re-running the
+same install with `approvedBuilds: ["sharp"]` finishes it. That round-trip is what
+has not been verified against a real package yet (§6.6).
+
+The GUI step needs a public GitHub repository, so it needs explicit human consent
+each time: restart DSH, open the sidebar's **Plugins** page, pick
+`dsh-plugin-share-demo`, press **Share**, read the panel (name, version, file
+count, size, sha256, repository), choose public or private, and press **Publish**.
+Success is a repository with a `v0.1.0` tag, a release carrying the `.tgz`, and a
+panel showing the URL that `plugin_share install` accepts.
