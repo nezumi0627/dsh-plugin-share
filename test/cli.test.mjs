@@ -2,11 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { readTarball } from '../lib/tgz-read.js';
 
 const execFileAsync = promisify(execFile);
 const CLI = fileURLToPath(new URL('../bin/plugin-share.mjs', import.meta.url));
@@ -70,6 +71,18 @@ test('pack honours --owner, --site and --created', async () => {
   assert.equal(again.code, 0);
   const second = JSON.parse(await readFile(join(dir, 'plugin-share.json'), 'utf8'));
   assert.equal(second.artifact.sha256, manifest.artifact.sha256);
+});
+
+test('pack --exclude keeps a named entry out of the tarball', async () => {
+  const dir = await makePluginDir();
+  await mkdir(join(dir, 'scratch'), { recursive: true });
+  await writeFile(join(dir, 'scratch', 'notes.md'), 'internal\n');
+  const result = await cli('pack', dir, '--owner', 'o', '--repo', 'x-demo', '--exclude', 'scratch');
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /excluded scratch/);
+  const packed = readTarball(await readFile(join(dir, 'dist', 'x-demo-1.0.0.tgz')));
+  assert.equal(packed.some((entry) => entry.name.includes('scratch')), false);
+  assert.ok(packed.some((entry) => entry.name === 'package/index.js'));
 });
 
 test('verify accepts the published digest and refuses another', async () => {

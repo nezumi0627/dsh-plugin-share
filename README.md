@@ -108,7 +108,7 @@ The CLI is for the author's side and for checking things by hand:
 ```text
 plugin-share — pack a DSH plugin, and check a shared one
 
-  plugin-share pack <dir> [--out <dir>] [--owner <github>] [--repo <name>] [--site <url>] [--created <iso>]
+  plugin-share pack <dir> [--out <dir>] [--owner <github>] [--repo <name>] [--site <url>] [--created <iso>] [--exclude <name>]…
   plugin-share inspect <source> [--expect-sha256 <hex>]
   plugin-share verify <tarball> [--expect-sha256 <hex>]
   plugin-share --help
@@ -116,7 +116,9 @@ plugin-share — pack a DSH plugin, and check a shared one
 
 `pack` writes `<dir>/dist/<name>-<version>.tgz`, `<dir>/plugin-share.json`, and
 prints the sha256. It prints a warning when `--owner` is missing, because the
-manifest must name the GitHub account it will be published under.
+manifest must name the GitHub account it will be published under. `--exclude`
+repeatedly keeps a top-level entry (a scratch directory the repository itself
+ignores, say) out of the tarball.
 
 `inspect` and `verify` exit `0` when all is well, `1` on a mismatch or a refusal,
 and `2` on a usage error. Installing and removing are deliberately left to the

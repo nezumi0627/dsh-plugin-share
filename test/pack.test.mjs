@@ -45,8 +45,20 @@ test('packs a plugin with both manifests', async () => {
   assert.equal(validateManifest(result.repoManifest, 'repo').ok, true);
 });
 
-test('the repo manifest digest matches the written file', async () => {
+test('a named directory can be kept out of the tarball', async () => {
   const dir = await makePlugin();
+  await mkdir(join(dir, '.superpowers'), { recursive: true });
+  await writeFile(join(dir, '.superpowers', 'notes.md'), 'internal\n');
+  const all = await packDirectory(dir, { owner: 'o', repo: 'r' });
+  assert.ok(readTarball(all.tarballBytes).map((entry) => entry.name).includes('package/.superpowers/notes.md'));
+  const without = await packDirectory(dir, { owner: 'o', repo: 'r', exclude: ['.superpowers'] });
+  assert.equal(
+    readTarball(without.tarballBytes).some((entry) => entry.name.includes('.superpowers')),
+    false,
+  );
+});
+
+test('the repo manifest digest matches the written file', async () => {  const dir = await makePlugin();
   const result = await packDirectory(dir, { owner: 'o', repo: 'r' });
   assert.equal(result.manifestPath, join(dir, 'plugin-share.json'));
   assert.equal(result.tarballPath, join(dir, 'dist', 'x-demo-1.0.0.tgz'));

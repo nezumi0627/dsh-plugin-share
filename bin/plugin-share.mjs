@@ -14,12 +14,14 @@ import { sha256File } from '../lib/sha256.js';
 
 const USAGE = `plugin-share — pack a DSH plugin, and check a shared one
 
-  plugin-share pack <dir> [--out <dir>] [--owner <github>] [--repo <name>] [--site <url>] [--created <iso>]
+  plugin-share pack <dir> [--out <dir>] [--owner <github>] [--repo <name>] [--site <url>] [--created <iso>] [--exclude <name>]…
   plugin-share inspect <source> [--expect-sha256 <hex>]
   plugin-share verify <tarball> [--expect-sha256 <hex>]
   plugin-share --help
 
-  pack     write <dir>/dist/<name>-<version>.tgz and <dir>/plugin-share.json
+  pack     write <dir>/dist/<name>-<version>.tgz and <dir>/plugin-share.json;
+           --exclude keeps a top-level entry (a scratch directory the repository
+           ignores, say) out of the tarball, and may be repeated
   inspect  read a source (repository URL, release URL, tarball URL, or local
            .tgz) and report what installing it would do
   verify   print the sha256 of a local tarball, and refuse a mismatch
@@ -73,12 +75,14 @@ async function runPack(rest, values) {
       site: values.site,
       created: values.created,
       outDir: values.out,
+      exclude: values.exclude,
     });
     write(process.stdout, `packed ${result.repoManifest.name}@${result.repoManifest.version}`);
     write(process.stdout, `tarball ${result.tarballPath}`);
     write(process.stdout, `manifest ${result.manifestPath}`);
     write(process.stdout, `sha256 ${result.sha256}`);
     write(process.stdout, `bytes ${result.tarballBytes.length}`);
+    if (values.exclude !== undefined) write(process.stdout, `excluded ${values.exclude.join(' ')}`);
     for (const warning of result.warnings) write(process.stderr, `warning: ${warning}`);
     return 0;
   } catch (error) {
@@ -150,6 +154,7 @@ async function main(argv) {
         site: { type: 'string' },
         created: { type: 'string' },
         'expect-sha256': { type: 'string' },
+        exclude: { type: 'string', multiple: true },
       },
     });
   } catch (error) {
