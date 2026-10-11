@@ -174,3 +174,24 @@ test('a plan is reproducible without git when created is pinned, and says so whe
   const loose = await planPublish({ dir, run: makeRun() });
   assert.ok(loose.warnings.some((warning) => /reproducible/.test(warning)), JSON.stringify(loose.warnings));
 });
+
+test('a directory with no remote publishes to the account gh is logged in as', async () => {
+  const dir = await makePluginDir();
+  // No .git at all: the plugin has never been pushed, so there is no remote to read
+  // an owner from. A literal "local" would plan a repository that cannot exist.
+  const run = makeRun({ 'gh api user --jq .login': { code: 0, stdout: 'nezumi0627\n', stderr: '' } });
+  const publishPlan = await planPublish({ dir, repo: 'x-demo', run });
+  assert.equal(publishPlan.owner, 'nezumi0627');
+  assert.equal(publishPlan.repoHtmlUrl, 'https://github.com/nezumi0627/x-demo');
+
+  // A remote still wins, and an explicit owner wins over both.
+  const withRemote = makeRun({
+    'git config --get remote.origin.url': { code: 0, stdout: 'https://github.com/someone/x-demo.git\n', stderr: '' },
+    'gh api user --jq .login': { code: 0, stdout: 'nezumi0627\n', stderr: '' },
+  });
+  assert.equal((await planPublish({ dir, repo: 'x-demo', run: withRemote })).owner, 'someone');
+  assert.equal((await planPublish({ dir, owner: 'explicit', run })).owner, 'explicit');
+
+  // When gh cannot answer, the earlier behaviour stands.
+  assert.equal((await planPublish({ dir, repo: 'x-demo', run: makeRun() })).owner, 'local');
+});

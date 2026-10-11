@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-share",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Share DSH plugins by URL: a manifest format, a packer, and an installer that verifies sha256 before the profile installs a tarball.",
   "type": "module",

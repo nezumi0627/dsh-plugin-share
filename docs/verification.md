@@ -13,7 +13,7 @@ $ node --test
 ℹ fail 0
 ```
 
-(as of the tree tag `v0.1.2` points at; run `node --test` to reproduce)
+(as of the tree tag `v0.1.3` points at; run `node --test` to reproduce)
 
 Covered: manifest validation for both forms (schema required fields are asserted
 to be exactly the ones the validator enforces), tarball read/write round-trips
@@ -39,19 +39,19 @@ disagree with itself. Read the digest from there, then check it four ways:
 
 ```text
 $ node bin/plugin-share.mjs pack . --owner nezumi0627 --repo dsh-plugin-share \
-    --created 2026-10-12T00:00:00+09:00 --exclude .superpowers
-packed dsh-plugin-share@0.1.2
+    --created 2026-10-11T23:58:00+09:00 --exclude .superpowers
+packed dsh-plugin-share@0.1.3
 sha256 <written into plugin-share.json>
 bytes <same file>
 
-$ (Get-FileHash dist\dsh-plugin-share-0.1.2.tgz -Algorithm SHA256).Hash
+$ (Get-FileHash dist\dsh-plugin-share-0.1.3.tgz -Algorithm SHA256).Hash
 <plugin-share.json's artifact.sha256>
 
-$ gh release view v0.1.2 --json assets
+$ gh release view v0.1.3 --json assets
 "digest": "sha256:<the same>"
 "size": <artifact.bytes>
 
-$ curl -sL -o curl.tgz https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.2/dsh-plugin-share-0.1.2.tgz
+$ curl -sL -o curl.tgz https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.3/dsh-plugin-share-0.1.3.tgz
 <the same digest, and artifact.bytes bytes>
 ```
 
@@ -61,7 +61,7 @@ digest, and a fresh download of the release asset.
 `--created` is passed explicitly because `pack` otherwise reads it from the
 directory's commit date (format.md §1.1), which would make the digest change with
 any later commit. The published bytes are the packed files of the tree at tag
-`v0.1.2`; the tag itself also records the digest in `plugin-share.json`, which
+`v0.1.3`; the tag itself also records the digest in `plugin-share.json`, which
 `pack` excludes, so the tagged tree and the artifact still describe one tree.
 `--exclude .superpowers` keeps the agent's working directory out.
 
@@ -72,23 +72,23 @@ The tarball holds 49 entries: every source file plus `package/plugin-share.json`
 The 0.1.0 asset was replaced once, after the installer-result fix (commit
 `c6f87b6`): the first build's digest identified bytes that would have reported a
 successful profile install as a failure, so it was withdrawn rather than left as
-the recommended artifact. 0.1.1 was the review response in §7 and 0.1.2 the field fix in §8; the manifest format
+the recommended artifact. 0.1.1 was the review response in §7, 0.1.2 the client-half field fix in §8, and 0.1.3 the owner fallback in §8; the manifest format
 is unchanged, so `share` stays `1`.
 
-`git rev-parse v0.1.2` names the commit whose packed files the release carries.
+`git rev-parse v0.1.3` names the commit whose packed files the release carries.
 
 ## 3. pnpm accepts the tarball
 
 Run in a throwaway workspace under `%TEMP%`, not in the live profile:
 
 ```text
-$ node <…>/pnpm.mjs add "file:C:/…/dist/dsh-plugin-share-0.1.2.tgz" --dir %TEMP%\ps-pnpm
+$ node <…>/pnpm.mjs add "file:C:/…/dist/dsh-plugin-share-0.1.3.tgz" --dir %TEMP%\ps-pnpm
 Packages: +1
-+ dsh-plugin-share 0.1.2
++ dsh-plugin-share 0.1.3
 Done in 945ms using pnpm v11.7.0
 ```
 
-- `package.json` afterwards: `"dsh-plugin-share": "file:C:/…/dist/dsh-plugin-share-0.1.2.tgz"` —
+- `package.json` afterwards: `"dsh-plugin-share": "file:C:/…/dist/dsh-plugin-share-0.1.3.tgz"` —
   pnpm records the `file:` spec **verbatim, absolute and with forward slashes**.
   That answers the design's open question about `profileSpec`: `toPnpmSpec()`'s
   output is what the profile will carry.
@@ -185,7 +185,7 @@ Make sure it appears in list_bundles and that a plugin_share tool becomes
 available. If it does not, tell me what is missing instead of installing
 anything else.
 
-https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.2/dsh-plugin-share-0.1.2.tgz
+https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.3/dsh-plugin-share-0.1.3.tgz
 ```
 
 Then restart DSH, and ask for `plugin_share` with `action: list`. Success is:
@@ -291,6 +291,14 @@ runtime.
 
 0.1.2 fixes it and makes the test harness refuse an undeclared service exactly as
 the runtime does, so the omission now fails in the suite instead of in the browser.
+
+The same install exposed a second problem one step further on, in the publish plan:
+the Japanese localization plugin's directory is not a git repository and has no
+remote, so the owner fell back to the literal `local` and the panel offered
+`https://github.com/local/local-dsh-locale-ja` — a repository `gh repo create` could
+never create. 0.1.3 asks `gh api user --jq .login` for the account `gh` is
+authenticated as, and only then falls back to `local`, so the planned URL is one
+that can exist. A remote still wins over `gh`, and an explicit owner wins over both.
 Worth noting for anyone upgrading from 0.1.0: it also predates §7's publish fix, so
 publishing from a directory that is not a git repository would have answered 409,
 and the client half's `inject` declaration is required before the button exists at
