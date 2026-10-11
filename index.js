@@ -62,7 +62,9 @@ export function apply(ctx) {
   ctx.inject(['tools', 'pluginManager'], (toolCtx) => {
     const installer = makeInstaller(toolCtx);
     toolCtx.effect(
-      () => toolCtx.tools.register(makeTool({ installer, mode: (exec) => resolveMode(toolCtx, exec) })),
+      // The sandbox policy is a root service, so it is read from the root context:
+      // the injected context is a child, and a missing policy must mean "refuse".
+      () => toolCtx.tools.register(makeTool({ installer, mode: (exec) => resolveMode(ctx, exec) })),
       'plugin-share: tool',
     );
   });
