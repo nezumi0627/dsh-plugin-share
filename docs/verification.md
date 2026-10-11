@@ -34,7 +34,8 @@ tarball, so the record lives outside the artifact it describes and can never
 disagree with itself. Read the digest from there, then check it four ways:
 
 ```text
-$ node bin/plugin-share.mjs pack . --owner nezumi0627 --repo dsh-plugin-share --exclude .superpowers
+$ node bin/plugin-share.mjs pack . --owner nezumi0627 --repo dsh-plugin-share \
+    --created 2026-10-11T23:24:08+09:00 --exclude .superpowers
 packed dsh-plugin-share@0.1.0
 sha256 <written into plugin-share.json>
 bytes <same file>
@@ -53,12 +54,15 @@ $ curl -sL -o curl.tgz https://github.com/nezumi0627/dsh-plugin-share/releases/d
 So four independent readings agree: the packer, Windows' own SHA256, GitHub's API
 digest, and a fresh download of the release asset.
 
+`--created` is passed explicitly because `pack` otherwise reads it from the
+directory's commit date (format.md §1.1), which would make the digest change with
+any later commit. The release was packed from commit `d2e4df1`, so that date plus
+that tree is what reproduces the published bytes.
+
 The 0.1.0 asset was replaced once, after the installer-result fix (commit
 `c6f87b6`): the first build's digest identified bytes that would have reported a
 successful profile install as a failure, so it was withdrawn rather than left as
-the recommended artifact. `pack` is deterministic for a given directory *and*
-commit date — `created` comes from the commit — so a rebuild of the same tree
-reproduces the same digest, and any later commit legitimately produces a new one.
+the recommended artifact.
 
 The tarball holds 40 entries: every source file plus `package/plugin-share.json`
 (the embedded manifest). It contains no `.superpowers/` working directory, no
