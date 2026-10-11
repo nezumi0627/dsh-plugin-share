@@ -108,3 +108,47 @@ test('readEntry returns one entry by name and undefined for a missing name', () 
   assert.equal(readEntry(bytes, 'package/a.js').toString('utf8'), 'hi');
   assert.equal(readEntry(bytes, 'package/missing.js'), undefined);
 });
+
+test('a directory entry is name-checked like a file', () => {
+  for (const name of ['/etc/', '../../', 'package/../../evil/', 'C:\\Windows\\', '..\\..\\evil\\']) {
+    assert.throws(() => readTarball(rawTar([{ name, typeflag: '5' }])), /^Error: tar: /, `accepted ${name}`);
+  }
+  assert.deepEqual(readTarball(rawTar([{ name: 'package/lib/', typeflag: '5' }])), []);
+});
+
+test('a backslash in an entry name is refused', () => {
+  assert.throws(() => readTarball(rawTar([{ name: 'package/..\\..\\evil.js', data: 'x' }])), /backslash/);
+  assert.throws(() => readTarball(rawTar([{ name: '..\\..\\evil.js', data: 'x' }])), /backslash/);
+});
+
+test('a duplicate entry name is refused', () => {
+  const bytes = rawTar([
+    { name: 'package/package.json', data: '{"name":"benign"}' },
+    { name: 'package/package.json', data: '{"name":"evil"}' },
+  ]);
+  assert.throws(() => readTarball(bytes), /duplicate entry name/);
+});
+
+test('a gzip bomb is refused without being inflated', () => {
+  // 64 MiB of zeros is a few KiB on the wire. Comparing the caps only after
+  // inflating would let a small input demand hundreds of megabytes first.
+  const bomb = gzipSync(Buffer.alloc(64 * 1024 * 1024));
+  assert.ok(bomb.length < 1024 * 1024, `the bomb should be small: ${bomb.length} bytes`);
+  assert.throws(() => readTarball(bomb, { maxTotalBytes: 1024 }), /expands beyond the limit/);
+});
+
+test('an archive that legitimately fills its caps is still read', () => {
+  const bytes = writeTarball([{ name: 'package/a.bin', data: Buffer.alloc(2 * 1024 * 1024) }], { mtimeMs: 0 });
+  const entries = readTarball(bytes);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].data.length, 2 * 1024 * 1024);
+});
+
+test('repeated reads of one buffer reuse one parse, and a new buffer is parsed again', () => {
+  const bytes = writeTarball([{ name: 'package/a.js', data: Buffer.from('hi') }], { mtimeMs: 0 });
+  assert.equal(readTarball(bytes)[0].data, readTarball(bytes)[0].data);
+  const copy = Buffer.from(bytes);
+  assert.notEqual(readTarball(copy)[0].data, readTarball(bytes)[0].data);
+  // Limits are part of the key: a stricter read of the same bytes still refuses.
+  assert.throws(() => readTarball(bytes, { maxEntries: 0 }), /too many entries/);
+});
