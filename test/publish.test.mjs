@@ -160,3 +160,17 @@ test('without gh, the push path is used instead of creating a repository', async
   assert.ok(run.keys().includes('git push -u origin HEAD'));
   assert.equal(run.keys().some((key) => key.startsWith('gh repo create')), false);
 });
+
+test('a plan is reproducible without git when created is pinned, and says so when it is not', async () => {
+  const dir = await makePluginDir();
+  const pinned = { dir, created: '2026-10-11T00:00:00.000Z', run: makeRun() };
+  const first = await planPublish(pinned);
+  const second = await planPublish(pinned);
+  assert.equal(first.created, '2026-10-11T00:00:00.000Z');
+  assert.equal(first.sha256, second.sha256);
+
+  // Without a pin and without a git commit date, created is the current time, so
+  // the digest is not reproducible — the plan has to admit that.
+  const loose = await planPublish({ dir, run: makeRun() });
+  assert.ok(loose.warnings.some((warning) => /reproducible/.test(warning)), JSON.stringify(loose.warnings));
+});

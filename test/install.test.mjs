@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -226,7 +227,7 @@ test('a build approval round-trip finishes the install', async () => {
   assert.equal((await findInstalled('x-demo', { root })).state, 'installed');
 });
 
-test('a failed install leaves no ledger entry', async () => {
+test('a failed install leaves no ledger entry and no artifact behind', async () => {
   const { routes } = await makeShared();
   const root = await makeStoreRoot();
   const installer = makeInstaller({ fail: true });
@@ -234,6 +235,19 @@ test('a failed install leaves no ledger entry', async () => {
   assert.equal(result.ok, false);
   assert.equal(result.status, 'install-failed');
   assert.deepEqual(await readInstalled({ root }), []);
+  // The copy written for this install is not referenced by anything, so it goes.
+  assert.equal(await readArtifact('x-demo', '1.0.0', { root }), undefined);
+  assert.equal(existsSync(artifactPath('x-demo', '1.0.0', { root })), false);
+});
+
+test('a build-approval pause keeps its artifact, because the profile has the spec', async () => {
+  const { routes } = await makeShared();
+  const root = await makeStoreRoot();
+  const installer = makeInstaller({ pending: ['sharp'] });
+  const result = await installShare(SOURCE, { installer, root, fetchImpl: fakeFetch(routes) });
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 'builds-pending');
+  assert.notEqual(await readArtifact('x-demo', '1.0.0', { root }), undefined);
 });
 
 test('an embedded manifest that disagrees with the repository manifest is refused', async () => {

@@ -30,7 +30,11 @@ names to GitHub: the cost of a quiet mistake here is somebody else's machine.
    Run the whole suite before every commit. New behavior starts as a failing test.
 6. **Do not delete or rewrite `artifacts/`.** Those files are the verified
    tarballs a profile points at. Nothing in this repository may clean them up
-   automatically.
+   automatically. The single exception is the one file an install has just written
+   for itself, removed by that same install when the installer refused the bundle
+   (`lib/install.js`): it was never recorded in the ledger and no profile points at
+   it. An install that *threw* keeps its artifact, because the profile's state is
+   then unknown.
 7. **Writes stay inside `$DSH_HOME/plugin-share/`** (the store and the ledger) or
    inside the author's own plugin repository (the publish path). Never write into
    `node_modules`, a profile's `package.json`, or a stranger's repository.
@@ -69,9 +73,13 @@ The manifest format is a public interface: other people's repositories will carr
 - `install` and `remove` in the tool require `danger-full-access`; that refusal is
   fail-closed and must stay that way.
 - Publishing is irreversible and public by default, and must never happen without
-  the explicit confirmation from the panel (plus a digest match when one is sent).
-- Reading a tarball must refuse absolute entry names, `..` escapes, and link
-  entries, and enforce the caps in `lib/tgz-read.js`.
+  the explicit confirmation from the panel **and** the digest it showed: a publish
+  request without a `sha256` is refused, not published.
+- Reading a tarball must refuse absolute entry names, `..` escapes, backslashes,
+  duplicate entry names, and link entries; it must name-check directory entries
+  too, bound the inflate itself (not only the declared sizes), and enforce the
+  caps in `lib/tgz-read.js`. Packing must refuse a symlink or junction instead of
+  following it, because following one publishes whatever it points at.
 
 ## Conventions
 

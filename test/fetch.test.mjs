@@ -62,3 +62,15 @@ test('readLocalFile returns bytes and enforces the limit', async () => {
   await assert.rejects(readLocalFile(path, { maxBytes: 2 }), /limit/);
   await assert.rejects(readLocalFile(join(dir, 'missing.tgz')), /ENOENT|no such file/i);
 });
+
+test('a first request that is not https is refused, and allowInsecure overrides it', async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url);
+    return new Response(Buffer.from('x'), { status: 200 });
+  };
+  await assert.rejects(() => fetchBytes('http://evil.example/a.tgz', { fetchImpl }), /refusing to fetch a URL that is not https/);
+  assert.deepEqual(calls, []);
+  assert.equal((await fetchBytes('http://127.0.0.1:1234/a.tgz', { fetchImpl, allowInsecure: true })).toString('utf8'), 'x');
+  assert.deepEqual(calls, ['http://127.0.0.1:1234/a.tgz']);
+});

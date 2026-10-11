@@ -184,9 +184,10 @@ test('publish runs in the background and status reports it', async () => {
   const dir = await makePluginDir();
   const run = makeRun(NO_REMOTE);
   const live = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run });
+  const planned = await call(live.plan, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
   const accepted = await call(live.publish, {
     token: TOKEN,
-    body: JSON.stringify({ name: 'x-demo', confirm: true }),
+    body: JSON.stringify({ name: 'x-demo', confirm: true, sha256: planned.payload.plan.sha256 }),
   });
   assert.equal(accepted.status, 202);
   assert.match(accepted.payload.id, /^[0-9a-f-]{36}$/);
@@ -216,7 +217,11 @@ test('a failing publish is reported through status instead of thrown', async () 
   const dir = await makePluginDir();
   const run = makeRun({ ...NO_REMOTE, 'gh repo create': { code: 1, stdout: '', stderr: 'gh: not logged in' } });
   const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run });
-  const accepted = await call(ui.publish, { token: TOKEN, body: JSON.stringify({ name: 'x-demo', confirm: true }) });
+  const planned = await call(ui.plan, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
+  const accepted = await call(ui.publish, {
+    token: TOKEN,
+    body: JSON.stringify({ name: 'x-demo', confirm: true, sha256: planned.payload.plan.sha256 }),
+  });
   assert.equal(accepted.status, 202);
   const failed = await waitFor(async () => {
     const status = await call(ui.status, { token: TOKEN, body: JSON.stringify({ id: accepted.payload.id }) });
@@ -239,4 +244,83 @@ test('shareableLocalDir reads only link and directory specs', () => {
   assert.equal(shareableLocalDir({ dependencies: { a: '1.2.3' } }, 'a'), undefined);
   assert.equal(shareableLocalDir({ dependencies: {} }, 'a'), undefined);
   assert.equal(shareableLocalDir(undefined, 'a'), undefined);
+});
+
+test('the digest on the panel is the digest that gets published', async () => {
+  // The plugin directory is not a git repository, so a second pack would take its
+  // timestamp from the clock and produce different bytes. The panel's digest has to
+  // be the one confirmed and published, or the honest flow can never finish.
+  const dir = await makePluginDir();
+  const run = makeRun(NO_REMOTE);
+  const live = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run });
+
+  const planned = await call(live.plan, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
+  assert.equal(planned.status, 200);
+  const shown = planned.payload.plan.sha256;
+
+  const accepted = await call(live.publish, {
+    token: TOKEN,
+    body: JSON.stringify({ name: 'x-demo', confirm: true, sha256: shown }),
+  });
+  assert.equal(accepted.status, 202, JSON.stringify(accepted.payload));
+  assert.equal(accepted.payload.plan.sha256, shown);
+});
+
+test('publish without a digest is refused, and a wrong digest publishes nothing', async () => {
+  const dir = await makePluginDir();
+  const run = makeRun(NO_REMOTE);
+  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run });
+
+  const noDigest = await call(ui.publish, { token: TOKEN, body: JSON.stringify({ name: 'x-demo', confirm: true }) });
+  assert.equal(noDigest.status, 400);
+  assert.match(noDigest.payload.error, /sha256 is required/);
+  assert.equal(ui.jobs.size, 0);
+
+  const wrong = await call(ui.publish, {
+    token: TOKEN,
+    body: JSON.stringify({ name: 'x-demo', confirm: true, sha256: 'f'.repeat(64) }),
+  });
+  assert.equal(wrong.status, 409);
+  assert.equal(ui.jobs.size, 0);
+  // Planning asks git and gh about the directory, but a refused request publishes
+  // nothing: no repository is created and no release is uploaded.
+  assert.deepEqual(
+    run.calls.filter((call) => call.startsWith('gh repo create') || call.startsWith('git push')),
+    [],
+  );
+});
+
+test('the token is compared in full, and a same-length wrong token is refused', async () => {
+  const dir = await makePluginDir();
+  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } } });
+  const sameLength = `${TOKEN.slice(0, -1)}${TOKEN.endsWith('a') ? 'b' : 'a'}`;
+  assert.equal(sameLength.length, TOKEN.length);
+  assert.equal((await call(ui.plan, { token: sameLength, body: JSON.stringify({ name: 'x-demo' }) })).status, 403);
+  assert.equal((await call(ui.plan, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) })).status, 200);
+});
+
+test('the job table does not grow without bound', async () => {
+  const dir = await makePluginDir();
+  const run = makeRun(NO_REMOTE);
+  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run });
+  const planned = await call(ui.plan, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
+  assert.equal(planned.status, 200);
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    // Each round waits for the previous publish to finish, because a publish writes
+    // `.gitignore` (which is packed) and the panel would plan again after it.
+    const fresh = await call(ui.plan, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
+    assert.equal(fresh.status, 200);
+    const accepted = await call(ui.publish, {
+      token: TOKEN,
+      body: JSON.stringify({ name: 'x-demo', confirm: true, sha256: fresh.payload.plan.sha256 }),
+    });
+    assert.equal(accepted.status, 202, JSON.stringify(accepted.payload));
+    await waitFor(async () => {
+      const status = await call(ui.status, { token: TOKEN, body: JSON.stringify({ id: accepted.payload.id }) });
+      return status.payload.stage === 'done' || status.payload.stage === 'error' ? status.payload : false;
+    });
+  }
+  // 60 runs went through; once they have all settled the table has shrunk, because a
+  // job that is still packing or publishing is never pruned.
+  assert.ok(ui.jobs.size <= 55, `jobs should be pruned, saw ${ui.jobs.size}`);
 });
