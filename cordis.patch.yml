@@ -1,0 +1,8 @@
+# Bundle patch for dsh-plugin-share.
+#
+# This bundle contributes exactly one Loader row, `plugin-share`, which registers
+# the `plugin_share` agent tool, the Host half of the share GUI, and (through
+# `dsh.client`) the Share button on the plugin detail page.
+- insert:
+    - id: plugin-share
+      name: 'dsh-plugin-share'

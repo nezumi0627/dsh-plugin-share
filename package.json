@@ -1,0 +1,37 @@
+{
+  "name": "dsh-plugin-share",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Share DSH plugins by URL: a manifest format, a packer, and an installer that verifies sha256 before the profile installs a tarball.",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "plugin-share": "./bin/plugin-share.mjs"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "lib/*.js",
+    "bin/*.mjs",
+    "schema/*.json",
+    "README.md",
+    "AGENTS.md",
+    "docs/*.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  }
+}
