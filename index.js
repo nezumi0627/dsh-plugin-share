@@ -22,23 +22,21 @@ function readProfileManifest() {
   }
 }
 
-/** The name of a bundle row, whichever field this build calls it. */
-function bundleName(row) {
-  return row?.name ?? row?.packageName ?? row?.package ?? row?.id;
-}
-
 /** Adapt `ctx.pluginManager` to the narrow installer interface lib/install.js needs. */
 function makeInstaller(ctx) {
   return {
     async installedNames() {
+      // `listBundles()` rows carry `name`, plus the bundle's declared plugin rows.
       const rows = await ctx.pluginManager.listBundles();
-      return rows.map(bundleName).filter((name) => typeof name === 'string');
+      return rows
+        .map((row) => (typeof row?.name === 'string' ? row.name : row?.packageName))
+        .filter((name) => typeof name === 'string' && name !== '');
     },
     async installBundle(spec, options) {
       return await ctx.pluginManager.installBundle(spec, options);
     },
     async removeBundle(name) {
-      await ctx.pluginManager.removeBundle(name);
+      return await ctx.pluginManager.removeBundle(name);
     },
   };
 }

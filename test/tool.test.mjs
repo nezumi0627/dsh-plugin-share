@@ -59,7 +59,7 @@ function fakeFetch(routes) {
   return impl;
 }
 
-function makeInstaller({ names = [], fail = false } = {}) {
+function makeInstaller({ names = [], fail = false, removeOutcome } = {}) {
   const state = { calls: [], removed: [], names: [...names] };
   return {
     state,
@@ -68,12 +68,16 @@ function makeInstaller({ names = [], fail = false } = {}) {
     },
     async installBundle(spec, options) {
       state.calls.push({ spec, options });
-      if (fail) return { ok: false, error: 'pnpm refused the spec' };
-      return { ok: true };
+      if (fail) {
+        return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'invalid-spec', diagnostic: 'pnpm refused the spec' } };
+      }
+      return { changed: true, application: 'applied', stage: 'install', target: spec };
     },
     async removeBundle(name) {
       state.removed.push(name);
+      if (removeOutcome !== undefined) return removeOutcome;
       state.names = state.names.filter((entry) => entry !== name);
+      return { changed: true, application: 'applied', stage: 'remove', target: name };
     },
   };
 }
@@ -215,4 +219,30 @@ test('install without a source is refused', async () => {
 test('a stored artifact path is reachable for the message a person reads', async () => {
   const { root } = await makeToolWithDeps();
   assert.match(artifactPath('x-demo', '1.0.0', { root }), /x-demo/);
+});
+
+test('a failed removal is reported and the ledger row is kept', async () => {
+  const installer = makeInstaller({
+    names: ['x-demo'],
+    removeOutcome: { changed: false, application: 'failed', stage: 'remove', target: 'x-demo', error: { code: 'bundle-in-use', diagnostic: 'a session is using it' } },
+  });
+  const { tool, root } = await makeToolWithDeps({ installer });
+  await recordInstall(installRecord({ name: 'x-demo', sha256: 'a'.repeat(64), profileSpec: 'file:C:/x.tgz' }), { root });
+  const result = await run(tool, { action: 'remove', name: 'x-demo' });
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 'remove-failed');
+  assert.equal(result.code, 'bundle-in-use');
+  assert.match(result.message, /a session is using it/);
+  assert.equal((await findInstalled('x-demo', { root })).name, 'x-demo');
+});
+
+test('a removal that needs a restart still clears the record and says so', async () => {
+  const installer = makeInstaller({ names: ['x-demo'], removeOutcome: { changed: true, application: 'restart-required', stage: 'remove', target: 'x-demo' } });
+  const { tool, root } = await makeToolWithDeps({ installer });
+  await recordInstall(installRecord({ name: 'x-demo', sha256: 'a'.repeat(64), profileSpec: 'file:C:/x.tgz' }), { root });
+  const result = await run(tool, { action: 'remove', name: 'x-demo' });
+  assert.equal(result.ok, true);
+  assert.equal(result.restartRequired, true);
+  assert.match(result.message, /restart DSH/);
+  assert.deepEqual(await readInstalled({ root }), []);
 });

@@ -42,11 +42,17 @@ If the release asset is unavailable, the same tag installs from git:
 ... instead of the .tgz URL, use this spec: git+https://github.com/nezumi0627/dsh-plugin-share#v0.1.0
 ```
 
-If the agent has no `plugin_manager` tool, it cannot install a bundle. Enable the
-`tool-plugin-manager` plugin in the profile's Cordis patch (or use a preset that
-includes it), then retry Prompt A. That operation itself needs
-`danger-full-access` permission, because installing a bundle changes the profile
-for every session. See the DSH documentation for the profile patch format.
+If the agent has no `plugin_manager` tool, it cannot install a bundle either: DSH
+ships that tool disabled by default and switches it on in the **Cordis** agent
+preset (`tool-plugin-manager` is `disabled: true` in the Web app's patch, and the
+Cordis preset re-enables it as `@deepseek-ai/dsh-plugin-manager/tools`). Start the
+session in that preset — or add that module to the preset you use — and retry
+Prompt A. The install itself needs `danger-full-access`, because it changes the
+profile for every session, and the installed Host code then runs in the desktop
+process.
+
+The sidebar's **Plugins** page, where the Share button below appears, comes from
+the Web app bundle and is on by default.
 
 Two things to know about this one step:
 

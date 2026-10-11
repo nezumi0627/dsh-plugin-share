@@ -78,7 +78,47 @@ Done in 945ms using pnpm v11.7.0
 - No dependency resolution happened: the tarball declares none, and no registry
   was contacted.
 
-## 4. What is **not** verified yet
+## 5. The host API, read from the real package
+
+`@deepseek-ai/dsh-plugin-manager` was read in the installed DSH tree
+(`_asar_full/dsh/node_modules/@deepseek-ai/dsh-plugin-manager`, version
+`0.2.0-rc.2`) rather than guessed, because the design flagged the host's exact
+result shapes as unknown. Two defects were found that way and fixed:
+
+- `installBundle(spec, options)` returns
+  `{changed, application, stage, target, error?: {code, diagnostic}, warnings?,
+  pendingBuilds?, approvedBuilds?, packageResult?, bundle?}` — **there is no `ok`
+  field.** The code had required `result.ok === true`, so every real install would
+  have been reported as a failure. It now reads `application` / `error`, treats an
+  unrecognizable result as a refusal, and still accepts `{ok: true}` from a simple
+  adapter.
+- `error` is an object, not a sentence. A refusal used to be reported as
+  `[object Object]`; it now reads `code: diagnostic` (for example
+  `incompatible-version: peer @deepseek-ai/cordis is 4.0.4`).
+
+Also confirmed:
+
+- `listBundles()` rows carry `name`, `version?`, `enabled`, `installed`, `rows[]` —
+  the adapter's `row.name` is right, and the bundle name is what the profile lists.
+- `installBundle`'s options are `{enabled, requestId, approvedBuilds, registry}`;
+  the call passes `enabled: true` and `approvedBuilds` on a retry.
+- Awaiting `installBundle` **is** the whole operation — DSH's own `plugin_manager`
+  tool does exactly `await manager.installBundle(...)`. `requestId` and
+  `waitForInstall` are only for cancellation and progress, so not passing them is
+  fine.
+- `removeBundle(name)` answers with the same shape, so a failed removal is now
+  reported (`remove-failed`) and the ledger row is kept instead of claiming
+  success.
+- Where the tool comes from: `tool-plugin-manager` is `disabled: true` in
+  `@deepseek-ai/dsh-web-app/cordis.patch.yml` and re-enabled by
+  `presets/cordis.patch.yml` as `@deepseek-ai/dsh-plugin-manager/tools`, disabled
+  only when there is no `profileContext`. The `ui-plugin-manager` client entry (the
+  sidebar Plugins page, which declares `plugins.detail.actions`) is in the main
+  patch, so the page exists in the Web app.
+- The slot's documented subject is `{kind: 'bundle', pkg}` where `pkg` carries
+  name, version, installed and enabled — matching what the Share button reads.
+
+## 6. What is **not** verified yet
 
 These need a live DSH profile, and the session that wrote this had no
 `plugin_manager` tool, so they are still open:
@@ -103,7 +143,7 @@ These need a live DSH profile, and the session that wrote this had no
    is tested with a fake installer that reports a pending build; a real
    dependency with install scripts has not been installed.
 
-### Finishing (4.1)
+### Finishing (6.1)
 
 In a DSH session that has `plugin_manager`, paste Prompt A from the README:
 

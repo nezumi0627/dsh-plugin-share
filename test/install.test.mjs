@@ -57,7 +57,16 @@ function fakeFetch(routes) {
   return impl;
 }
 
-function makeInstaller({ names = [], fail = false, pending = [], onInstall } = {}) {
+/**
+ * The real `pluginManager` answers with `{changed, application, stage, target,
+ * error?}` — no `ok` field — so the fake must answer that way too, or the tests
+ * would not notice a host that misreads the real result.
+ */
+function applied(overrides = {}) {
+  return { changed: true, application: 'applied', stage: 'install', target: 'x-demo', ...overrides };
+}
+
+function makeInstaller({ names = [], fail = false, pending = [], onInstall, outcome } = {}) {
   const state = { calls: [], removed: [], names: [...names] };
   return {
     state,
@@ -67,12 +76,15 @@ function makeInstaller({ names = [], fail = false, pending = [], onInstall } = {
     async installBundle(spec, options) {
       state.calls.push({ spec, options });
       if (onInstall !== undefined) onInstall(state);
-      if (fail) return { ok: false, error: 'pnpm refused the spec' };
-      if (pending.length > 0 && state.calls.length === 1) return { ok: true, pendingBuilds: [...pending] };
-      return { ok: true };
+      if (outcome !== undefined) return outcome;
+      if (fail) return applied({ changed: false, application: 'failed', error: { code: 'invalid-spec', diagnostic: 'pnpm refused the spec' } });
+      if (pending.length > 0 && state.calls.length === 1) return applied({ pendingBuilds: [...pending] });
+      return applied();
     },
     async removeBundle(name) {
       state.removed.push(name);
+      state.names = state.names.filter((entry) => entry !== name);
+      return { changed: true, application: 'applied', stage: 'remove', target: name };
     },
   };
 }
@@ -353,4 +365,56 @@ test('a missing manifest is reported as an error, not a crash', async () => {
 
 test('toPnpmSpec writes a file spec with forward slashes', () => {
   assert.equal(toPnpmSpec('C:\\Users\\x\\.dsh\\plugin-share\\a.tgz'), 'file:C:/Users/x/.dsh/plugin-share/a.tgz');
+});
+
+test('the installer outcome is read the way the real plugin manager answers', async () => {
+  const { routes } = await makeShared();
+  const root = await makeStoreRoot();
+
+  const restarted = await installShare(SOURCE, {
+    installer: makeInstaller({ outcome: { changed: true, application: 'restart-required', stage: 'install', target: 'x-demo' } }),
+    root,
+    fetchImpl: fakeFetch(routes),
+  });
+  assert.equal(restarted.ok, true);
+  assert.equal(restarted.status, 'installed');
+  assert.equal(restarted.restartRequired, true);
+  assert.match(restarted.message, /restart DSH/);
+  assert.equal((await findInstalled('x-demo', { root })).state, 'installed');
+
+  const cancelled = await installShare(SOURCE, {
+    installer: makeInstaller({ outcome: { changed: false, application: 'cancelled', stage: 'install', target: 'x-demo' } }),
+    root: await makeStoreRoot(),
+    fetchImpl: fakeFetch(routes),
+  });
+  assert.equal(cancelled.ok, false);
+  assert.equal(cancelled.status, 'install-failed');
+  assert.equal(cancelled.code, 'cancelled');
+  assert.match(cancelled.message, /cancelled/);
+
+  const coded = await installShare(SOURCE, {
+    installer: makeInstaller({ outcome: { changed: false, application: 'failed', stage: 'install', target: 'x-demo', error: { code: 'incompatible-version', diagnostic: 'peer @deepseek-ai/cordis is 4.0.4' } } }),
+    root: await makeStoreRoot(),
+    fetchImpl: fakeFetch(routes),
+  });
+  assert.equal(coded.ok, false);
+  assert.equal(coded.status, 'install-failed');
+  assert.match(coded.message, /incompatible-version: peer/);
+  assert.doesNotMatch(coded.message, /\[object/);
+
+  const silent = await installShare(SOURCE, {
+    installer: makeInstaller({ outcome: {} }),
+    root: await makeStoreRoot(),
+    fetchImpl: fakeFetch(routes),
+  });
+  assert.equal(silent.ok, false);
+  assert.equal(silent.status, 'install-failed');
+
+  const legacy = await installShare(SOURCE, {
+    installer: makeInstaller({ outcome: { ok: true } }),
+    root: await makeStoreRoot(),
+    fetchImpl: fakeFetch(routes),
+  });
+  assert.equal(legacy.ok, true);
+  assert.equal(legacy.status, 'installed');
 });
