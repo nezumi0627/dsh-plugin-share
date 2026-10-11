@@ -26,28 +26,39 @@ round-trip, replacement, refusal), the `plugin_share` tool's five actions and it
 `danger-full-access` refusal, the CLI, the publish planner, and the web host and
 client halves with a fake web server and a fake React.
 
-## 2. The release, checked against the repository
+## 2. The release, checked four ways
+
+The digest of the published tarball is recorded in `plugin-share.json` at the
+repository root — **not here**. `pack` writes that file and excludes it from the
+tarball, so the record lives outside the artifact it describes and can never
+disagree with itself. Read the digest from there, then check it four ways:
 
 ```text
 $ node bin/plugin-share.mjs pack . --owner nezumi0627 --repo dsh-plugin-share --exclude .superpowers
 packed dsh-plugin-share@0.1.0
-sha256 d95b0eab10945a50bba28535de4dcc8e5e37b1d2637ed357314c2a36a29d4953
-bytes 82767
-excluded .superpowers
+sha256 <written into plugin-share.json>
+bytes <same file>
 
 $ (Get-FileHash dist\dsh-plugin-share-0.1.0.tgz -Algorithm SHA256).Hash
-d95b0eab10945a50bba28535de4dcc8e5e37b1d2637ed357314c2a36a29d4953   # == plugin-share.json's artifact.sha256
+<plugin-share.json's artifact.sha256>
 
 $ gh release view v0.1.0 --json assets
-"digest": "sha256:d95b0eab10945a50bba28535de4dcc8e5e37b1d2637ed357314c2a36a29d4953"
-"size": 82767
+"digest": "sha256:<the same>"
+"size": <artifact.bytes>
 
 $ curl -sL -o curl.tgz https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.0/dsh-plugin-share-0.1.0.tgz
-d95b0eab10945a50bba28535de4dcc8e5e37b1d2637ed357314c2a36a29d4953   # 82767 bytes, from the release URL
+<the same digest, and artifact.bytes bytes>
 ```
 
 So four independent readings agree: the packer, Windows' own SHA256, GitHub's API
 digest, and a fresh download of the release asset.
+
+The 0.1.0 asset was replaced once, after the installer-result fix (commit
+`c6f87b6`): the first build's digest identified bytes that would have reported a
+successful profile install as a failure, so it was withdrawn rather than left as
+the recommended artifact. `pack` is deterministic for a given directory *and*
+commit date — `created` comes from the commit — so a rebuild of the same tree
+reproduces the same digest, and any later commit legitimately produces a new one.
 
 The tarball holds 40 entries: every source file plus `package/plugin-share.json`
 (the embedded manifest). It contains no `.superpowers/` working directory, no
@@ -159,7 +170,7 @@ https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.0/dsh-plug
 
 Then restart DSH, and ask for `plugin_share` with `action: list`. Success is:
 the bundle in `list_bundles`, the tool answering, and `plugin_share inspect` of
-this repository reporting the sha256 above.
+this repository reporting the digest recorded in its `plugin-share.json`.
 
 ### The field test, ready to run (6.2)
 

@@ -50,6 +50,12 @@ The manifest format is a public interface: other people's repositories will carr
 - Adding an optional field is not a break. Removing one, renaming one, changing
   its meaning, or changing what the digest covers *is*: bump `share` and document
   both versions.
+- The digest of a published tarball is recorded **only** in `plugin-share.json`,
+  which `pack` excludes from the tarball, and in local build notes. Never write it
+  into a file that rides inside the tarball: a document inside an artifact can
+  only ever pin a *previous* build, so the record would be wrong the moment it
+  shipped. `docs/verification.md` documents the method and where to read the
+  number, not the number itself.
 - The same applies to the ledger: it is written as
   `{ "share": 1, "installs": [...] }` and read tolerantly, so an unreadable
   ledger degrades to "no records" rather than a crash.
