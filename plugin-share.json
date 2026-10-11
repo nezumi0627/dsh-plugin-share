@@ -9,9 +9,9 @@
   "created": "2026-10-11T23:46:00+09:00",
   "artifact": {
     "format": "tgz",
-    "sha256": "ca07b26af8550b1e732a061eeadd4385086db4233e62c5cba25e343db0160408",
+    "sha256": "80fb9d42ba1f13e4645dec96bd0a9b62c2b78ec236790958db342e446c886b24",
     "url": "https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.1/dsh-plugin-share-0.1.1.tgz",
-    "bytes": 98130
+    "bytes": 98195
   },
   "summary": "Share DSH plugins by URL: a manifest format, a packer, and an installer that verifies sha256 before the profile installs a tarball.",
   "license": "MIT"
