@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Plugin share">
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#0f766e" />
+  <path d="M19 34v9a5 5 0 0 0 5 5h16a5 5 0 0 0 5-5v-9" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" />
+  <path d="M32 44V18" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" />
+  <path d="M23 27l9-9 9 9" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+</svg>
