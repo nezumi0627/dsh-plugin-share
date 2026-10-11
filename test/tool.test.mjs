@@ -11,6 +11,21 @@ import { makeTool } from '../lib/tool.js';
 const SOURCE = 'https://github.com/o/x-demo';
 const MANIFEST_URL = 'https://raw.githubusercontent.com/o/x-demo/HEAD/plugin-share.json';
 
+/** One ledger record in the shape docs/format.md documents. */
+function installRecord({ name, version = '1.0.0', sha256, profileSpec }) {
+  return {
+    name,
+    version,
+    source: { input: SOURCE, kind: 'repo' },
+    artifact: { url: `${SOURCE}/releases/download/v${version}/${name}-${version}.tgz`, sha256, path: `C:/store/artifacts/${name}/${version}.tgz` },
+    author: { github: 'o' },
+    created: '2026-10-11T00:00:00.000Z',
+    installedAt: '2026-10-11T00:00:00.000Z',
+    profileSpec,
+    state: 'installed',
+  };
+}
+
 async function makePluginDir({ name = 'x-demo', version = '1.0.0' } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'plugin-share-tool-'));
   await writeFile(
@@ -140,14 +155,8 @@ test('install reports a digest mismatch instead of throwing', async () => {
 test('list reports the ledger and the profile side by side', async () => {
   const { tool, installer, root } = await makeToolWithDeps();
   installer.state.names.push('x-demo');
-  await recordInstall(
-    { name: 'x-demo', version: '1.0.0', sha256: 'a'.repeat(64), installedAt: '2026-10-11T00:00:00.000Z', source: SOURCE, profileSpec: 'file:C:/x.tgz', format: 'tgz', status: 'installed' },
-    { root },
-  );
-  await recordInstall(
-    { name: 'y-demo', version: '2.0.0', sha256: 'b'.repeat(64), installedAt: '2026-10-11T00:00:00.000Z', source: SOURCE, profileSpec: 'file:C:/y.tgz', format: 'tgz', status: 'installed' },
-    { root },
-  );
+  await recordInstall(installRecord({ name: 'x-demo', sha256: 'a'.repeat(64), profileSpec: 'file:C:/x.tgz' }), { root });
+  await recordInstall(installRecord({ name: 'y-demo', version: '2.0.0', sha256: 'b'.repeat(64), profileSpec: 'file:C:/y.tgz' }), { root });
   const result = await run(tool, { action: 'list' });
   assert.equal(result.ok, true);
   assert.equal(result.total, 2);
@@ -155,6 +164,9 @@ test('list reports the ledger and the profile side by side', async () => {
     result.entries.map((entry) => [entry.name, entry.inProfile]),
     [['x-demo', true], ['y-demo', false]],
   );
+  assert.equal(result.entries[0].sha256, 'a'.repeat(64));
+  assert.equal(result.entries[0].state, 'installed');
+  assert.equal(result.entries[0].source, SOURCE);
 });
 
 test('verify re-hashes the stored artifact and reports a swap', async () => {
@@ -162,10 +174,7 @@ test('verify re-hashes the stored artifact and reports a swap', async () => {
   const bytes = Buffer.from('the verified bytes');
   await storeArtifact('x-demo', '1.0.0', bytes, { root });
   const digest = sha256Hex(bytes);
-  await recordInstall(
-    { name: 'x-demo', version: '1.0.0', sha256: digest, installedAt: '2026-10-11T00:00:00.000Z', source: SOURCE, profileSpec: 'file:C:/x.tgz', format: 'tgz', status: 'installed' },
-    { root },
-  );
+  await recordInstall(installRecord({ name: 'x-demo', sha256: digest, profileSpec: 'file:C:/x.tgz' }), { root });
   const good = await run(tool, { action: 'verify', name: 'x-demo' });
   assert.equal(good.ok, true);
   assert.equal(good.status, 'verified');
@@ -183,10 +192,7 @@ test('verify re-hashes the stored artifact and reports a swap', async () => {
 test('remove takes the bundle out of the profile and clears the ledger', async () => {
   const { tool, installer, root } = await makeToolWithDeps();
   installer.state.names.push('x-demo');
-  await recordInstall(
-    { name: 'x-demo', version: '1.0.0', sha256: 'a'.repeat(64), installedAt: '2026-10-11T00:00:00.000Z', source: SOURCE, profileSpec: 'file:C:/x.tgz', format: 'tgz', status: 'installed' },
-    { root },
-  );
+  await recordInstall(installRecord({ name: 'x-demo', sha256: 'a'.repeat(64), profileSpec: 'file:C:/x.tgz' }), { root });
   const result = await run(tool, { action: 'remove', name: 'x-demo' });
   assert.equal(result.ok, true);
   assert.deepEqual(installer.state.removed, ['x-demo']);

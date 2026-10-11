@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { sha256Hex } from '../lib/sha256.js';
 import {
   artifactPath,
+  currentInstalls,
   findInstalled,
   readArtifact,
   readInstalled,
@@ -22,11 +23,13 @@ async function makeRoot() {
 const record = {
   name: 'dsh-demo',
   version: '1.0.0',
-  sha256: 'a'.repeat(64),
+  source: { input: 'https://github.com/o/r', kind: 'repo' },
+  artifact: { url: 'https://github.com/o/r/releases/download/v1.0.0/dsh-demo-1.0.0.tgz', sha256: 'a'.repeat(64), path: 'C:/store/artifacts/dsh-demo/1.0.0.tgz' },
+  author: { name: 'someone', github: 'someone' },
+  created: '2026-10-11T00:00:00.000Z',
   installedAt: '2026-10-11T00:00:00.000Z',
-  source: 'https://github.com/o/r',
   profileSpec: 'file:C:/tmp/dsh-demo-1.0.0.tgz',
-  format: 'tgz',
+  state: 'installed',
 };
 
 test('an artifact is stored under the root and read back byte for byte', async () => {
@@ -79,25 +82,34 @@ test('verifyArtifact passes for the digest of the stored bytes', async () => {
   assert.deepEqual(result, { ok: true, path });
 });
 
-test('the install ledger round-trips, replaces by name, and removes', async () => {
+test('the install ledger keeps history, reports the current record, and removes', async () => {
   const root = await makeRoot();
   assert.deepEqual(await readInstalled({ root }), []);
   assert.equal(await findInstalled('dsh-demo', { root }), undefined);
   await recordInstall(record, { root });
   assert.deepEqual(await findInstalled('dsh-demo', { root }), record);
   await recordInstall({ ...record, version: '1.1.0' }, { root });
-  assert.deepEqual(await readInstalled({ root }), [{ ...record, version: '1.1.0' }]);
+  assert.deepEqual(await readInstalled({ root }), [{ ...record, state: 'superseded' }, { ...record, version: '1.1.0' }]);
+  assert.deepEqual(await currentInstalls({ root }), [{ ...record, version: '1.1.0' }]);
+  assert.equal((await findInstalled('dsh-demo', { root })).version, '1.1.0');
   assert.equal(await removeInstalled('dsh-demo', { root }), true);
   assert.equal(await removeInstalled('dsh-demo', { root }), false);
   assert.deepEqual(await readInstalled({ root }), []);
 });
 
-test('the install ledger is a JSON array under the root', async () => {
+test('finishing a pending build replaces its row instead of adding a live one', async () => {
+  const root = await makeRoot();
+  await recordInstall({ ...record, state: 'pending-builds' }, { root });
+  await recordInstall(record, { root });
+  assert.deepEqual(await readInstalled({ root }), [record]);
+});
+
+test('the install ledger is the versioned object the format documents', async () => {
   const root = await makeRoot();
   await recordInstall(record, { root });
   const raw = JSON.parse(await readFile(join(root, 'installed.json'), 'utf8'));
-  assert.deepEqual(raw, [record]);
-  assert.equal(Array.isArray(raw), true);
+  assert.deepEqual(raw, { share: 1, installs: [record] });
   await writeFile(join(root, 'installed.json'), 'not json');
   assert.deepEqual(await readInstalled({ root }), []);
+  assert.deepEqual(await currentInstalls({ root }), []);
 });

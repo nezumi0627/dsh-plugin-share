@@ -94,11 +94,14 @@ test('installs a repository source after verifying its digest', async () => {
   assert.match(installer.state.calls[0].spec, /^file:[A-Za-z]:\//);
   assert.deepEqual(await readArtifact('x-demo', '1.0.0', { root }), packed.tarballBytes);
   const record = await findInstalled('x-demo', { root });
-  assert.equal(record.sha256, packed.sha256);
+  assert.equal(record.artifact.sha256, packed.sha256);
+  assert.equal(record.artifact.path, stored);
   assert.equal(record.version, '1.0.0');
-  assert.equal(record.format, 'tgz');
-  assert.equal(record.status, 'installed');
-  assert.equal(record.source, SOURCE);
+  assert.equal(record.state, 'installed');
+  assert.equal(record.source.input, SOURCE);
+  assert.equal(record.source.kind, 'repo');
+  assert.equal(record.author.github, 'o');
+  assert.equal(record.created, packed.repoManifest.created);
   assert.equal(record.profileSpec, toPnpmSpec(stored));
   assert.deepEqual(fetchImpl.calls, [MANIFEST_URL, packed.repoManifest.artifact.url]);
 });
@@ -198,7 +201,7 @@ test('a build approval round-trip finishes the install', async () => {
   assert.equal(first.ok, false);
   assert.equal(first.status, 'builds-pending');
   assert.deepEqual(first.pendingBuilds, ['esbuild']);
-  assert.equal((await findInstalled('x-demo', { root })).status, 'pending-builds');
+  assert.equal((await findInstalled('x-demo', { root })).state, 'pending-builds');
   const second = await installShare(SOURCE, {
     installer,
     root,
@@ -208,7 +211,7 @@ test('a build approval round-trip finishes the install', async () => {
   assert.equal(second.ok, true);
   assert.equal(second.status, 'installed');
   assert.deepEqual(installer.state.calls[1].options.approvedBuilds, ['esbuild']);
-  assert.equal((await findInstalled('x-demo', { root })).status, 'installed');
+  assert.equal((await findInstalled('x-demo', { root })).state, 'installed');
 });
 
 test('a failed install leaves no ledger entry', async () => {
