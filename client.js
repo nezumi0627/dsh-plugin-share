@@ -245,6 +245,10 @@
       }
 
       return {
+        // The Client runtime hands `apply` a guarded ctx: reading a service the
+        // returned plugin did not declare is denied, not undefined, so without this
+        // line `ctx.slots` is refused and no button is ever registered.
+        inject: ['slots', 'locale'],
         apply(ctx) {
           ctx.effect(() => {
             const style = ensureStyles();

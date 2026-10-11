@@ -128,12 +128,8 @@ function makeHarness(routes = {}) {
   const injected = [];
   const registered = [];
   const effects = [];
-  const ctx = {
-    effect(fn) {
-      const dispose = fn();
-      effects.push(dispose);
-      return dispose;
-    },
+  const declared = new Set(module.inject ?? []);
+  const services = {
     slots: {
       inject(name, callback) {
         injected.push(name);
@@ -146,8 +142,35 @@ function makeHarness(routes = {}) {
         };
       },
     },
+    locale: { getLocale: () => ({ active: 'en' }) },
   };
-  return { window, document, appended, fetches, intervals, loads, react, module, ctx, injected, registered, effects };
+  // The real runtime is stricter than a plain object: a service the returned plugin
+  // did not declare in `inject` is denied when it is read. Mirroring that here is
+  // what makes a missing declaration fail in this suite instead of in the browser.
+  const ctx = new Proxy(
+    {
+      effect(fn) {
+        const dispose = fn();
+        effects.push(dispose);
+        return dispose;
+      },
+    },
+    {
+      get(target, prop) {
+        if (Reflect.has(target, prop)) return Reflect.get(target, prop);
+        if (typeof prop === 'string' && Object.hasOwn(services, prop)) {
+          if (!declared.has(prop)) {
+            throw new Error(
+              `client-guard: service "${prop}" is not declared by the plugin: add it to inject (${[...declared].join(', ')})`,
+            );
+          }
+          return services[prop];
+        }
+        return undefined;
+      },
+    },
+  );
+  return { window, document, appended, fetches, intervals, loads, react, module, ctx, injected, registered, effects, declared };
 }
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
@@ -175,6 +198,9 @@ test('the module registers itself, injects the detail action, and styles the pag
   assert.equal(harness.loads.length, 1);
   assert.equal(harness.loads[0].id, 'dsh-plugin-share');
   assert.equal(typeof harness.module.apply, 'function');
+  // Declared, because the runtime denies an undeclared service instead of leaving
+  // it undefined: without this the button is never registered at all.
+  assert.ok(harness.module.inject.includes('slots'), 'the plugin must declare ctx.slots');
   harness.module.apply(harness.ctx);
   assert.deepEqual(harness.injected, ['plugins.detail.actions']);
   assert.equal(harness.registered.length, 1);

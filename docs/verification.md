@@ -13,7 +13,7 @@ $ node --test
 ℹ fail 0
 ```
 
-(as of the tree tag `v0.1.1` points at; run `node --test` to reproduce)
+(as of the tree tag `v0.1.2` points at; run `node --test` to reproduce)
 
 Covered: manifest validation for both forms (schema required fields are asserted
 to be exactly the ones the validator enforces), tarball read/write round-trips
@@ -27,7 +27,8 @@ build approval round-trip, replacement, refusal, and the artifact a refusal
 removes), the `plugin_share` tool's five actions and its `danger-full-access`
 refusal, the CLI, the publish planner (including a reproducible pack and the
 refusal to pack through a link), and the web host and client halves with a fake
-web server and a fake React.
+web server and a fake React whose `ctx` refuses an undeclared service the way the
+real Client runtime does.
 
 ## 2. The release, checked four ways
 
@@ -38,19 +39,19 @@ disagree with itself. Read the digest from there, then check it four ways:
 
 ```text
 $ node bin/plugin-share.mjs pack . --owner nezumi0627 --repo dsh-plugin-share \
-    --created 2026-10-11T23:46:00+09:00 --exclude .superpowers
-packed dsh-plugin-share@0.1.1
+    --created 2026-10-12T00:00:00+09:00 --exclude .superpowers
+packed dsh-plugin-share@0.1.2
 sha256 <written into plugin-share.json>
 bytes <same file>
 
-$ (Get-FileHash dist\dsh-plugin-share-0.1.1.tgz -Algorithm SHA256).Hash
+$ (Get-FileHash dist\dsh-plugin-share-0.1.2.tgz -Algorithm SHA256).Hash
 <plugin-share.json's artifact.sha256>
 
-$ gh release view v0.1.1 --json assets
+$ gh release view v0.1.2 --json assets
 "digest": "sha256:<the same>"
 "size": <artifact.bytes>
 
-$ curl -sL -o curl.tgz https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.1/dsh-plugin-share-0.1.1.tgz
+$ curl -sL -o curl.tgz https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.2/dsh-plugin-share-0.1.2.tgz
 <the same digest, and artifact.bytes bytes>
 ```
 
@@ -60,7 +61,7 @@ digest, and a fresh download of the release asset.
 `--created` is passed explicitly because `pack` otherwise reads it from the
 directory's commit date (format.md §1.1), which would make the digest change with
 any later commit. The published bytes are the packed files of the tree at tag
-`v0.1.1`; the tag itself also records the digest in `plugin-share.json`, which
+`v0.1.2`; the tag itself also records the digest in `plugin-share.json`, which
 `pack` excludes, so the tagged tree and the artifact still describe one tree.
 `--exclude .superpowers` keeps the agent's working directory out.
 
@@ -71,23 +72,23 @@ The tarball holds 49 entries: every source file plus `package/plugin-share.json`
 The 0.1.0 asset was replaced once, after the installer-result fix (commit
 `c6f87b6`): the first build's digest identified bytes that would have reported a
 successful profile install as a failure, so it was withdrawn rather than left as
-the recommended artifact. 0.1.1 is the review response in §7; the manifest format
+the recommended artifact. 0.1.1 was the review response in §7 and 0.1.2 the field fix in §8; the manifest format
 is unchanged, so `share` stays `1`.
 
-`git rev-parse v0.1.1` names the commit whose packed files the release carries.
+`git rev-parse v0.1.2` names the commit whose packed files the release carries.
 
 ## 3. pnpm accepts the tarball
 
 Run in a throwaway workspace under `%TEMP%`, not in the live profile:
 
 ```text
-$ node <…>/pnpm.mjs add "file:C:/…/dist/dsh-plugin-share-0.1.1.tgz" --dir %TEMP%\ps-pnpm
+$ node <…>/pnpm.mjs add "file:C:/…/dist/dsh-plugin-share-0.1.2.tgz" --dir %TEMP%\ps-pnpm
 Packages: +1
-+ dsh-plugin-share 0.1.1
++ dsh-plugin-share 0.1.2
 Done in 945ms using pnpm v11.7.0
 ```
 
-- `package.json` afterwards: `"dsh-plugin-share": "file:C:/…/dist/dsh-plugin-share-0.1.1.tgz"` —
+- `package.json` afterwards: `"dsh-plugin-share": "file:C:/…/dist/dsh-plugin-share-0.1.2.tgz"` —
   pnpm records the `file:` spec **verbatim, absolute and with forward slashes**.
   That answers the design's open question about `profileSpec`: `toPnpmSpec()`'s
   output is what the profile will carry.
@@ -184,7 +185,7 @@ Make sure it appears in list_bundles and that a plugin_share tool becomes
 available. If it does not, tell me what is missing instead of installing
 anything else.
 
-https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.1/dsh-plugin-share-0.1.1.tgz
+https://github.com/nezumi0627/dsh-plugin-share/releases/download/v0.1.2/dsh-plugin-share-0.1.2.tgz
 ```
 
 Then restart DSH, and ask for `plugin_share` with `action: list`. Success is:
@@ -263,3 +264,34 @@ One limit of that review: the environment had no `pnpm`, so what an *extractor*
 does with a hostile archive (findings 2, 3 and 7) was inferred from the format
 rather than executed. The reader refuses those archives outright, which is what the
 tests now pin.
+
+## 8. What the first real install showed
+
+0.1.0 was installed on 2026-10-11 23:34 through the Plugins page's **Add plugin**
+dialog (`dsh-plugin-share` landed in the profile's `dependencies` **and**
+`dsh.profile.bundles`, and pnpm's log for that operation is kept under
+`.plugin-manager/logs/operation-QPQ8f6/`). No Share button appeared on any
+package's page.
+
+The cause was in the client half. The Client runtime hands `apply` a *guarded*
+`ctx`: reading a service the returned plugin did not declare in `inject` is
+**denied**, not `undefined`. `client.js` declared nothing, so its `ctx.slots` read
+was refused and the action was never registered — silently, since the button is
+what would have reported the problem. The runtime says so in its own words:
+
+```text
+service "slots" is not declared by your plugin. Declare it on the plugin you
+return: { inject: ['slots', …], apply(ctx) { … } }
+```
+
+Every client half that works in that same profile declares its services
+(`inject: ['slots']`, `['slots', 'locale']`, …); this one did not. The unit test
+had passed because its fake `ctx` was a plain object, far more permissive than the
+runtime.
+
+0.1.2 fixes it and makes the test harness refuse an undeclared service exactly as
+the runtime does, so the omission now fails in the suite instead of in the browser.
+Worth noting for anyone upgrading from 0.1.0: it also predates §7's publish fix, so
+publishing from a directory that is not a git repository would have answered 409,
+and the client half's `inject` declaration is required before the button exists at
+all.
