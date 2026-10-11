@@ -15,10 +15,14 @@ names to GitHub: the cost of a quiet mistake here is somebody else's machine.
    by it; importing its internals breaks on any DSH update. Talk to the host only
    through the context services that are documented for plugins
    (`tools`, `webServer`, `pluginManager`, `logger`, `effect`, `inject`).
-3. **Never shell out to `pnpm` or `dsh`.** Installing a bundle goes through
-   `pluginManager.installBundle()`; that is the supported seam and it is what
-   keeps rollback, peer checks, and build approval working. The one exception is
-   `git`/`gh` in the publish path, which are the author's own tools.
+3. **Product code never shells out to `pnpm` or `dsh`.** Installing a bundle goes
+   through `pluginManager.installBundle()`; that is the supported seam and it is
+   what keeps rollback, peer checks, and build approval working. The exceptions are
+   `git`/`gh` in the publish path, which are the author's own tools, and
+   [`test/e2e-pnpm.test.mjs`](test/e2e-pnpm.test.mjs), which stands in for the
+   profile's package manager to prove that pnpm accepts the spec this plugin
+   builds. Nothing under `lib/`, `bin/`, `index.js` or `client.js` may start a
+   package manager, and no test may install a bundle any other way.
 4. **Node 22 or newer, ESM only.** No CommonJS `require` in `lib/`, `bin/`,
    `index.js`. (`client.js` is the exception: it is a plain browser script loaded
    by the Web module loader, and its `require('react')` comes from that loader.)
@@ -83,7 +87,8 @@ bin/plugin-share.mjs  the CLI (pack, inspect, verify)
 lib/                format, pack, tgz read/write, sha256, source parsing, fetch,
                     store, install, tool, publish, webui
 schema/             the manifest JSON Schema, both forms
-test/               node --test suites, one per module
+test/               node --test suites, one per module, plus the pnpm end-to-end
+fixtures/           two throwaway plugins for the field test (docs/verification.md §6.2)
 docs/format.md      the normative format document
 docs/superpowers/   the design and plan this was built from
 ```
