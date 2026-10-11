@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/nezumi0627/dsh-plugin-share/schema/plugin-share.schema.json",
+  "title": "plugin-share manifest",
+  "description": "The share format for DSH plugins. A repository holds the `repo` form at its root; the `embedded` form travels inside the tarball, where it cannot name its own digest.",
+  "oneOf": [{ "$ref": "#/$defs/repo" }, { "$ref": "#/$defs/embedded" }],
+  "$defs": {
+    "author": {
+      "type": "object",
+      "required": ["github"],
+      "properties": {
+        "name": { "type": "string", "description": "Display name of the author." },
+        "github": { "type": "string", "description": "GitHub account that owns the shared repository." },
+        "site": { "type": "string", "description": "The author's own site." }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "required": ["format", "sha256"],
+      "properties": {
+        "url": { "type": "string", "description": "Download URL; defaults to the release asset of this version." },
+        "format": { "const": "tgz", "description": "npm-format tarball." },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Digest of the tarball bytes." },
+        "bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "repo": {
+      "type": "object",
+      "required": ["share", "name", "version", "author", "created", "artifact"],
+      "properties": {
+        "share": { "const": 1 },
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "summary": { "type": "string" },
+        "license": { "type": "string" },
+        "author": { "$ref": "#/$defs/author" },
+        "created": { "type": "string", "format": "date-time" },
+        "artifact": { "$ref": "#/$defs/artifact" }
+      }
+    },
+    "embedded": {
+      "type": "object",
+      "required": ["share", "name", "version", "author", "created"],
+      "not": { "required": ["artifact"] },
+      "properties": {
+        "share": { "const": 1 },
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "summary": { "type": "string" },
+        "license": { "type": "string" },
+        "author": { "$ref": "#/$defs/author" },
+        "created": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}
