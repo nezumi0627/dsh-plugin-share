@@ -97,21 +97,32 @@ The same request in Japanese:
 相手に渡すリポジトリURLと sha256 を教えて。
 ```
 
-From the GUI you do not need the prompt at all: open the plugin's detail page and
-press **Share** (see below).
+From the GUI you do not need the prompt at all: open any local plugin's detail
+page and press **Share**. The first plugin asks you to connect GitHub and enter
+the URL of one empty catalog repository that you created. That URL is reused for
+all plugins.
 
-After publishing, press **Copy message for a friend** to copy a Japanese note with
-the repository URL. It asks the recipient to inspect the plugin's name, author,
-sha256, and dependencies first, and show you the result before installing.
+Before every publish, the panel shows the plugin's files, release tag, catalog
+repository, visibility, and exact SHA-256. Publication only starts after you
+confirm that panel. Releases use package-specific tags, so plugins with the same
+version do not collide. The repository root keeps a `README.md` catalog and
+`catalog.json`; each plugin's release carries its own tarball.
+
+If the repository URL is later saved from another plugin's Share button, it still
+replaces the one shared catalog target for every plugin. After publishing, press
+**友だちに送る文面をコピー** to copy that plugin's direct release-asset URL and
+SHA-256. The note asks the recipient to inspect the plugin first and install only
+after reviewing the result.
 
 ## Install a shared plugin
 
 **Prompt B, receiver side.** Paste this with whatever URL you were given:
 
 ```text
-Install the plugin at this URL with plugin-share: <URL>
-Run inspect first and show me what it is, who published it, the sha256, and its
-dependencies. Only install after I say OK.
+Use plugin-share to inspect this tarball, then install it after I approve:
+URL: <release asset URL>
+SHA-256: <digest>
+Show me the plugin name, author, digest, and dependencies before installing.
 ```
 
 What the agent does, in order: resolve the source → read `plugin-share.json` →

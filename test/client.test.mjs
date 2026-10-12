@@ -203,17 +203,18 @@ const SUBJECT = { kind: 'bundle', pkg: { name: 'x-demo', installed: true } };
 
 const PLAN = {
   ok: true,
+  confirmationId: 'confirmation-1',
   plan: {
     name: 'x-demo',
     version: '1.0.0',
-    tag: 'v1.0.0',
-    repoHtmlUrl: 'https://github.com/o/x-demo',
+    tag: 'x-demo-abc123-v1.0.0',
+    repoHtmlUrl: 'https://github.com/o/dsh-plugin-catalog',
     visibility: 'public',
     files: [{ path: 'package.json', bytes: 10 }],
     fileCount: 1,
     totalBytes: 10,
     sha256: 'a'.repeat(64),
-    artifactUrl: 'https://github.com/o/x-demo/releases/download/v1.0.0/x-demo-1.0.0.tgz',
+    artifactUrl: 'https://github.com/o/dsh-plugin-catalog/releases/download/x-demo-abc123-v1.0.0/x-demo-1.0.0.tgz',
   },
 };
 
@@ -256,11 +257,12 @@ test('a shareable bundle shows its per-plugin Share action without background pu
   assert.equal(harness.fetches.length, 0);
 });
 
-test('Share opens guided setup and a configured plugin publishes then offers copy text', async () => {
+test('Share opens guided setup, shows the digest confirmation, then offers copy text', async () => {
   const harness = makeHarness({
-    setup: { ok: true, connection: { login: 'owner' }, repository: { url: 'https://github.com/o/x-demo', owner: 'o', repo: 'x-demo' } },
-    share: { status: 202, payload: { ok: true, id: 'job-1' } },
-    status: { ok: true, stage: 'done', result: { repoHtmlUrl: 'https://github.com/o/x-demo', artifactUrl: 'https://github.com/o/x-demo/releases/download/v1.0.0/x-demo.tgz', tag: 'v1.0.0', updated: true } },
+    setup: { ok: true, connection: { login: 'owner' }, repository: { url: 'https://github.com/o/dsh-plugin-catalog', owner: 'o', repo: 'dsh-plugin-catalog' } },
+    plan: PLAN,
+    publish: { status: 202, payload: { ok: true, id: 'job-1', plan: PLAN.plan } },
+    status: { ok: true, stage: 'done', result: { repoHtmlUrl: 'https://github.com/o/dsh-plugin-catalog', catalogUrl: 'https://github.com/o/dsh-plugin-catalog', artifactUrl: PLAN.plan.artifactUrl, sha256: PLAN.plan.sha256, tag: PLAN.plan.tag, updated: true } },
   });
   harness.module.apply(harness.ctx);
   const Action = harness.registered[0].component;
@@ -270,9 +272,17 @@ test('Share opens guided setup and a configured plugin publishes then offers cop
   harness.react.__reset();
   Action({ subject: SUBJECT });
   await flush();
-  const shareRequest = harness.fetches.find((call) => call.url.endsWith('/plugin-share/share'));
-  assert.ok(shareRequest);
-  assert.equal(shareRequest.body.name, 'x-demo');
+  const planRequest = harness.fetches.find((call) => call.url.endsWith('/plugin-share/plan'));
+  assert.ok(planRequest);
+  assert.equal(planRequest.body.name, 'x-demo');
+  harness.react.__reset();
+  const confirmPanel = Action({ subject: SUBJECT });
+  assert.match(textOf(confirmPanel), new RegExp(PLAN.plan.sha256));
+  findButton(confirmPanel, 'Publish').props.onClick();
+  await flush();
+  const publishRequest = harness.fetches.find((call) => call.url.endsWith('/plugin-share/publish'));
+  assert.equal(publishRequest.body.confirmationId, 'confirmation-1');
+  assert.equal(publishRequest.body.sha256, PLAN.plan.sha256);
   harness.react.__reset();
   Action({ subject: SUBJECT });
   const interval = harness.intervals.at(-1);
@@ -280,7 +290,7 @@ test('Share opens guided setup and a configured plugin publishes then offers cop
   await interval.fn();
   harness.react.__reset();
   const done = Action({ subject: SUBJECT });
-  assert.match(textOf(done), /github\.com\/o\/x-demo/);
+  assert.match(textOf(done), /github\.com\/o\/dsh-plugin-catalog/);
   assert.match(textOf(done), /共有内容を更新しました/);
   const copy = findButton(done, '友だちに送る文面をコピー');
   assert.ok(copy);
@@ -288,7 +298,7 @@ test('Share opens guided setup and a configured plugin publishes then offers cop
   await flush();
   assert.match(harness.clipboardWrites[0], /inspect/);
   assert.match(harness.clipboardWrites[0], /SHA-256/);
-  assert.match(harness.clipboardWrites[0], /インストールはまだせず/);
+  assert.match(harness.clipboardWrites[0], /インストールできます/);
 });
 
 test('first-time Share presents numbered GitHub and manual repository setup', async () => {

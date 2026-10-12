@@ -122,7 +122,8 @@ async function waitFor(predicate, tries = 60) {  for (let attempt = 0; attempt <
   throw new Error('the job never reached the expected state');
 }
 
-async function makeUi({ profileManifest, run, root, fetch }) {
+async function makeUi({ profileManifest, run, root, fetch, configured = false }) {
+  if (configured && root) await saveRepository('x-demo', { owner: 'owner', repo: 'catalog', url: 'https://github.com/owner/catalog', private: false }, { root });
   const { ctx, registered, taps } = makeCtx();
   const { jobs } = registerWebUi(ctx, { profileManifest, run, root, fetch, token: TOKEN });
   return {
@@ -176,25 +177,25 @@ test('setup reports the local plugin and whether GitHub is connected', async () 
   assert.equal(response.payload.repository, undefined);
 });
 
-test('sharing requires a saved repository and never returns a GitHub token', async () => {
+test('legacy share endpoint refuses to publish without the confirmation flow', async () => {
   const dir = await makePluginDir();
   const root = await mkdtemp(join(tmpdir(), 'plugin-share-webui-store-'));
   const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, root });
   const response = await call(ui.share, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
   assert.equal(response.status, 409);
-  assert.equal(response.payload.setupRequired, true);
+  assert.equal(response.payload.confirmationRequired, true);
   assert.doesNotMatch(JSON.stringify(response.payload), /gh[pousr]_[A-Za-z0-9_]+/);
 });
 
-test('sharing blocks credential-bearing files before contacting GitHub', async () => {
+test('planning blocks credential-bearing files before contacting GitHub', async () => {
   const dir = await makePluginDir();
   const credential = ['DATABASE_', 'PASSWORD=do-not-', 'send-this-secret-123456'].join('');
   await writeFile(join(dir, 'config.env'), credential);
   const root = await mkdtemp(join(tmpdir(), 'plugin-share-webui-store-'));
-  await saveRepository('x-demo', { owner: 'owner', repo: 'x-demo', url: 'https://github.com/owner/x-demo' }, { root });
+  await saveRepository('x-demo', { owner: 'owner', repo: 'catalog', url: 'https://github.com/owner/catalog' }, { root });
   const run = makeRun({ 'gh api user --jq .login': { code: 0, stdout: 'owner\n', stderr: '' } });
   const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run, root, fetch: async () => assert.fail('must not contact GitHub') });
-  const response = await call(ui.share, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
+  const response = await call(ui.plan, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
   assert.equal(response.status, 400);
   assert.match(response.payload.error, /config\.env/);
   assert.doesNotMatch(response.payload.error, /send-this-secret/);
@@ -219,16 +220,17 @@ test('repository setup checks push permission and persists only the repository U
   assert.doesNotMatch(saved, /secret-token/);
 });
 
-test('plan describes what a link-installed bundle would publish', async () => {
+test('plan describes a package-specific release in the shared catalog', async () => {
   const dir = await makePluginDir();
-  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } } });
+  const root = await mkdtemp(join(tmpdir(), 'plugin-share-webui-store-'));
+  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, root, configured: true });
   const response = await call(ui.plan, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
   assert.equal(response.status, 200);
   const plan = response.payload.plan;
   assert.equal(plan.name, 'x-demo');
   assert.equal(plan.version, '1.0.0');
   assert.equal(plan.visibility, 'public');
-  assert.equal(plan.tag, 'v1.0.0');
+  assert.match(plan.tag, /^x-demo-[a-f0-9]{10}-v1\.0\.0$/);
   assert.match(plan.sha256, /^[0-9a-f]{64}$/);
   assert.ok(plan.files.some((file) => file.path === 'package.json'));
   assert.ok(plan.totalBytes > 0);
@@ -244,26 +246,22 @@ test('plan refuses a bundle that is not a local directory', async () => {
 
 test('publish runs in the background and status reports it', async () => {
   const dir = await makePluginDir();
-  const run = makeRun(NO_REMOTE);
-  const live = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run });
+  const run = makeRun({ ...NO_REMOTE, 'gh api user --jq .login': { code: 0, stdout: 'owner\n', stderr: '' }, 'gh auth token': { code: 0, stdout: 'test-token\n', stderr: '' } });
+  const root = await mkdtemp(join(tmpdir(), 'plugin-share-webui-store-'));
+  const live = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run, root, configured: true, fetch: async () => new Response(JSON.stringify({ message: 'temporary failure' }), { status: 503 }) });
   const planned = await call(live.plan, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
-  const accepted = await call(live.publish, {
-    token: TOKEN,
-    body: JSON.stringify({ name: 'x-demo', confirm: true, sha256: planned.payload.plan.sha256 }),
-  });
+  const request = { token: TOKEN, body: JSON.stringify({ name: 'x-demo', confirm: true, confirmationId: planned.payload.confirmationId, sha256: planned.payload.plan.sha256 }) };
+  const [accepted, concurrent] = await Promise.all([call(live.publish, request), call(live.publish, request)]);
   assert.equal(accepted.status, 202);
+  assert.equal(concurrent.status, 409);
   assert.match(accepted.payload.id, /^[0-9a-f-]{36}$/);
   assert.equal(accepted.payload.plan.visibility, 'public');
   const done = await waitFor(async () => {
     const status = await call(live.status, { token: TOKEN, body: JSON.stringify({ id: accepted.payload.id }) });
-    return status.payload.stage === 'done' ? status.payload : false;
+    return status.payload.stage === 'error' ? status.payload : false;
   });
-  assert.equal(done.result.tag, 'v1.0.0');
-  assert.equal(done.result.repoHtmlUrl, 'https://github.com/local/x-demo');
-  assert.match(done.result.artifactUrl, /releases\/download\/v1\.0\.0\//);
-  const release = run.calls.find((entry) => entry.startsWith('gh release create '));
-  assert.ok(release.includes(join(dir, 'dist', 'x-demo-1.0.0.tgz')));
-  assert.ok(release.includes(`sha256: ${accepted.payload.plan.sha256}`));
+  assert.match(done.error, /GitHub API refused/);
+  assert.ok(run.calls.includes('gh auth token --hostname github.com'));
 });
 
 test('publish is refused without an explicit confirmation', async () => {
@@ -277,20 +275,20 @@ test('publish is refused without an explicit confirmation', async () => {
 
 test('a failing publish is reported through status instead of thrown', async () => {
   const dir = await makePluginDir();
-  const run = makeRun({ ...NO_REMOTE, 'gh repo create': { code: 1, stdout: '', stderr: 'gh: not logged in' } });
-  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run });
+  const run = makeRun({ ...NO_REMOTE, 'gh api user --jq .login': { code: 0, stdout: 'owner\n', stderr: '' }, 'gh auth token': { code: 0, stdout: 'test-token\n', stderr: '' } });
+  const root = await mkdtemp(join(tmpdir(), 'plugin-share-webui-store-'));
+  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run, root, configured: true, fetch: async () => new Response(JSON.stringify({ message: 'access denied' }), { status: 403 }) });
   const planned = await call(ui.plan, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
   const accepted = await call(ui.publish, {
     token: TOKEN,
-    body: JSON.stringify({ name: 'x-demo', confirm: true, sha256: planned.payload.plan.sha256 }),
+    body: JSON.stringify({ name: 'x-demo', confirm: true, confirmationId: planned.payload.confirmationId, sha256: planned.payload.plan.sha256 }),
   });
   assert.equal(accepted.status, 202);
   const failed = await waitFor(async () => {
     const status = await call(ui.status, { token: TOKEN, body: JSON.stringify({ id: accepted.payload.id }) });
     return status.payload.stage === 'error' ? status.payload : false;
   });
-  assert.match(failed.error, /repo create/);
-  assert.match(failed.error, /not logged in/);
+  assert.match(failed.error, /GitHub API refused/);
 });
 
 test('an unknown job id is a 404', async () => {
@@ -313,8 +311,10 @@ test('the digest on the panel is the digest that gets published', async () => {
   // timestamp from the clock and produce different bytes. The panel's digest has to
   // be the one confirmed and published, or the honest flow can never finish.
   const dir = await makePluginDir();
-  const run = makeRun(NO_REMOTE);
-  const live = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run });
+  const run = makeRun({ ...NO_REMOTE, 'gh api user --jq .login': { code: 0, stdout: 'owner\n', stderr: '' }, 'gh auth token': { code: 0, stdout: 'test-token\n', stderr: '' } });
+  const root = await mkdtemp(join(tmpdir(), 'plugin-share-webui-store-'));
+  let apiCalls = 0;
+  const live = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run, root, configured: true, fetch: async () => { apiCalls += 1; return new Response(JSON.stringify({ message: 'intentional api failure' }), { status: 503 }); } });
 
   const planned = await call(live.plan, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
   assert.equal(planned.status, 200);
@@ -322,16 +322,19 @@ test('the digest on the panel is the digest that gets published', async () => {
 
   const accepted = await call(live.publish, {
     token: TOKEN,
-    body: JSON.stringify({ name: 'x-demo', confirm: true, sha256: shown }),
+    body: JSON.stringify({ name: 'x-demo', confirm: true, confirmationId: planned.payload.confirmationId, sha256: shown }),
   });
   assert.equal(accepted.status, 202, JSON.stringify(accepted.payload));
   assert.equal(accepted.payload.plan.sha256, shown);
+  await waitFor(async () => apiCalls > 0 ? true : false);
 });
 
 test('publish without a digest is refused, and a wrong digest publishes nothing', async () => {
   const dir = await makePluginDir();
   const run = makeRun(NO_REMOTE);
-  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run });
+  const root = await mkdtemp(join(tmpdir(), 'plugin-share-webui-store-'));
+  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run, root, configured: true });
+  const planned = await call(ui.plan, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
 
   const noDigest = await call(ui.publish, { token: TOKEN, body: JSON.stringify({ name: 'x-demo', confirm: true }) });
   assert.equal(noDigest.status, 400);
@@ -340,7 +343,7 @@ test('publish without a digest is refused, and a wrong digest publishes nothing'
 
   const wrong = await call(ui.publish, {
     token: TOKEN,
-    body: JSON.stringify({ name: 'x-demo', confirm: true, sha256: 'f'.repeat(64) }),
+    body: JSON.stringify({ name: 'x-demo', confirm: true, confirmationId: planned.payload.confirmationId, sha256: 'f'.repeat(64) }),
   });
   assert.equal(wrong.status, 409);
   assert.equal(ui.jobs.size, 0);
@@ -352,9 +355,23 @@ test('publish without a digest is refused, and a wrong digest publishes nothing'
   );
 });
 
+test('a matching digest alone cannot replace a panel confirmation', async () => {
+  const dir = await makePluginDir();
+  const root = await mkdtemp(join(tmpdir(), 'plugin-share-webui-store-'));
+  const run = makeRun(NO_REMOTE);
+  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, root, configured: true, run, fetch: async () => assert.fail('must not contact GitHub') });
+  const planned = await call(ui.plan, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
+  const bypass = await call(ui.publish, { token: TOKEN, body: JSON.stringify({ name: 'x-demo', confirm: true, sha256: planned.payload.plan.sha256 }) });
+  assert.equal(bypass.status, 409);
+  assert.match(bypass.payload.error, /confirmation/);
+  assert.equal(ui.jobs.size, 0);
+  assert.equal(run.calls.some((call) => call.startsWith('gh auth token')), false);
+});
+
 test('the token is compared in full, and a same-length wrong token is refused', async () => {
   const dir = await makePluginDir();
-  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } } });
+  const root = await mkdtemp(join(tmpdir(), 'plugin-share-webui-store-'));
+  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, root, configured: true });
   const sameLength = `${TOKEN.slice(0, -1)}${TOKEN.endsWith('a') ? 'b' : 'a'}`;
   assert.equal(sameLength.length, TOKEN.length);
   assert.equal((await call(ui.plan, { token: sameLength, body: JSON.stringify({ name: 'x-demo' }) })).status, 403);
@@ -363,18 +380,18 @@ test('the token is compared in full, and a same-length wrong token is refused', 
 
 test('the job table does not grow without bound', async () => {
   const dir = await makePluginDir();
-  const run = makeRun(NO_REMOTE);
-  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run });
+  const run = makeRun({ ...NO_REMOTE, 'gh api user --jq .login': { code: 0, stdout: 'owner\n', stderr: '' }, 'gh auth token': { code: 0, stdout: 'test-token\n', stderr: '' } });
+  const root = await mkdtemp(join(tmpdir(), 'plugin-share-webui-store-'));
+  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run, root, configured: true, fetch: async () => new Response(JSON.stringify({ message: 'offline' }), { status: 503 }) });
   const planned = await call(ui.plan, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
   assert.equal(planned.status, 200);
   for (let attempt = 0; attempt < 60; attempt += 1) {
-    // Each round waits for the previous publish to finish, because a publish writes
-    // `.gitignore` (which is packed) and the panel would plan again after it.
+    // Each round waits for the previous catalog request to settle before planning again.
     const fresh = await call(ui.plan, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
     assert.equal(fresh.status, 200);
     const accepted = await call(ui.publish, {
       token: TOKEN,
-      body: JSON.stringify({ name: 'x-demo', confirm: true, sha256: fresh.payload.plan.sha256 }),
+      body: JSON.stringify({ name: 'x-demo', confirm: true, confirmationId: fresh.payload.confirmationId, sha256: fresh.payload.plan.sha256 }),
     });
     assert.equal(accepted.status, 202, JSON.stringify(accepted.payload));
     await waitFor(async () => {

@@ -61,8 +61,9 @@
         return h('dl', { className: 'ps-facts' }, items);
       }
 
-      function friendInstructions(repoUrl) {
-        return `このDSHプラグインを確認してください:\n${repoUrl}\n\nまず plugin-share の inspect でプラグイン名・作者・SHA-256・依存関係を表示してください。インストールはまだせず、確認結果を私に見せてください。`;
+      function friendInstructions(result) {
+        const access = result.private ? '\nこの共有repoはPrivateです。先にGitHub閲覧権限を付けてもらってください。' : '';
+        return `このDSHプラグインを確認してください:\n${result.artifactUrl}\nSHA-256: ${result.sha256}\n\nまず plugin-share の inspect で内容を確認してください。問題なければ、このURLとSHA-256を指定してインストールできます。カタログ: ${result.catalogUrl ?? result.repoHtmlUrl}${access}`;
       }
 
       /** The Share button and its confirmation, progress, and result states. */
@@ -79,7 +80,6 @@
         const [stage, setStage] = React.useState('');
         const [result, setResult] = React.useState(null);
         const [error, setError] = React.useState(null);
-        const [visibility, setVisibility] = React.useState('public');
         const [jobId, setJobId] = React.useState(null);
         const [copyStatus, setCopyStatus] = React.useState('');
         const [setup, setSetup] = React.useState(null);
@@ -160,12 +160,13 @@
           setStage('準備中');
           setPhase('working');
           try {
-            const accepted = await call('/share', { name });
-            if (!accepted.ok || !accepted.payload?.id) {
-              if (accepted.payload?.setupRequired) { setPhase('setup'); return; }
-              throw new Error(accepted.payload?.error ?? `share failed (${accepted.status})`);
+            const answer = await call('/plan', { name });
+            if (!answer.ok || !answer.payload?.plan) {
+              if (answer.payload?.setupRequired) { setPhase('setup'); return; }
+              throw new Error(answer.payload?.error ?? `plan failed (${answer.status})`);
             }
-            setJobId(accepted.payload.id);
+            setPlan({ ...answer.payload.plan, confirmationId: answer.payload.confirmationId });
+            setPhase('confirm');
           } catch (failure) {
             setError(failure?.message ?? String(failure));
             setPhase('error');
@@ -180,7 +181,7 @@
             const accepted = await call('/publish', {
               name,
               confirm: true,
-              visibility,
+              confirmationId: plan.confirmationId,
               sha256: plan.sha256,
             });
             if (!accepted.ok || accepted.payload?.id === undefined) {
@@ -200,7 +201,7 @@
             if (typeof navigator === 'undefined' || typeof navigator.clipboard?.writeText !== 'function') {
               throw new Error('clipboard unavailable');
             }
-            await navigator.clipboard.writeText(friendInstructions(result.repoHtmlUrl));
+            await navigator.clipboard.writeText(friendInstructions(result));
             setCopyStatus('copied');
           } catch {
             setCopyStatus('failed');
@@ -286,33 +287,7 @@
             { className: 'ps-panel' },
             h('div', { className: 'ps-title' }, tr('pluginShare.confirm', 'Publish this plugin to GitHub?')),
             facts(plan),
-            h(
-              'div',
-              { className: 'ps-actions' },
-              h(
-                'label',
-                null,
-                h('input', {
-                  type: 'radio',
-                  name: `plugin-share-visibility-${plan.name}`,
-                  checked: visibility === 'public',
-                  onChange: () => setVisibility('public'),
-                }),
-                ' Public',
-              ),
-              h(
-                'label',
-                null,
-                h('input', {
-                  type: 'radio',
-                  name: `plugin-share-visibility-${plan.name}`,
-                  checked: visibility === 'private',
-                  onChange: () => setVisibility('private'),
-                }),
-                ' Private',
-              ),
-            ),
-            h('span', { className: 'ps-hint' }, tr('pluginShare.irreversible', 'Publishing creates a repository, a tag, and a release. It cannot be undone from here.')),
+            h('span', { className: 'ps-hint' }, 'このダイジェストのプラグインを、設定済みの共有カタログに公開します。カタログの公開範囲はGitHub repoの設定に従います。'),
             h(
               'div',
               { className: 'ps-actions' },
@@ -325,14 +300,14 @@
           return h('div', { className: 'ps-panel' }, h('div', { className: 'ps-title' }, tr('pluginShare.working', 'Publishing…')), h('span', { className: 'ps-hint' }, stage));
         }
         if (phase === 'done') {
-          const friendMessage = friendInstructions(result.repoHtmlUrl);
+          const friendMessage = friendInstructions(result);
           return h(
             'div',
             { className: 'ps-panel' },
             h('div', { className: 'ps-title' }, result.unchanged ? '変更はありません' : result.updated ? '共有内容を更新しました' : tr('pluginShare.done', 'Published')),
-            h('div', { className: 'ps-code' }, result.repoHtmlUrl ?? ''),
+            h('div', { className: 'ps-code' }, result.catalogUrl ?? result.repoHtmlUrl ?? ''),
             h('div', { className: 'ps-code' }, result.artifactUrl ?? ''),
-            h('div', { className: 'ps-hint' }, tr('pluginShare.install', 'Anyone can install it with plugin-share from that repository URL.')),
+            h('div', { className: 'ps-hint' }, 'Releaseとカタログを更新しました。コピー文にはダウンロードURLとSHA-256が含まれます。'),
             h('button', { type: 'button', className: 'ps-button', onClick: () => void copyFriendInstructions() }, '友だちに送る文面をコピー'),
             copyStatus === 'copied' ? h('span', { className: 'ps-hint', role: 'status' }, 'コピーしました') : null,
             copyStatus === 'failed'
