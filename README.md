@@ -100,6 +100,10 @@ The same request in Japanese:
 From the GUI you do not need the prompt at all: open the plugin's detail page and
 press **Share** (see below).
 
+After publishing, press **Copy message for a friend** to copy a Japanese note with
+the repository URL. It asks the recipient to inspect the plugin's name, author,
+sha256, and dependencies first, and show you the result before installing.
+
 ## Install a shared plugin
 
 **Prompt B, receiver side.** Paste this with whatever URL you were given:
@@ -152,17 +156,21 @@ that was installed from a local directory (a `link:` or directory `file:` spec i
 the profile). Bundles from the registry or from someone else's tarball have no
 local source to publish, so no button is shown.
 
-Pressing it opens a confirmation panel with the name, version, file count, total
-size, **sha256**, repository, and a public/private choice. Pressing Publish then
-creates the GitHub repository (when needed), commits, tags `v<version>`, pushes,
-and uploads the tarball as a release asset — using your own `git` and `gh`
-credentials, in your own account. The panel then shows the repository URL and the
-artifact URL to paste into the receiver's prompt.
+On first use, a short setup walks through GitHub browser sign-in and asks for the
+URL of a repository you created manually. The plugin checks that the connected
+account can write to it, then remembers only the repository URL under
+`$DSH_HOME/plugin-share/`; GitHub credentials remain in `gh`'s credential store.
+It checks included files for credential-like names and contents before packing or
+uploading. If it finds a likely secret, sharing stops and reports the file path
+without showing the matched value.
 
-Publishing is irreversible: it puts a tag and a release in a public repository by
-default. The panel shows this before anything leaves your machine, and the host
-refuses a publish that does not carry the explicit confirmation and, when it is
-sent, a digest that matches the files as they are right now.
+Press **Share** again and it compares the plugin files with GitHub. If they match,
+it returns the existing repository and artifact links without writing a commit or
+release. If files changed, it commits the new contents, adds a digest-named release
+asset, and updates the existing tag and release. The completed panel offers a
+Japanese inspect-first message to copy to a friend. Private repositories require
+the recipient to have GitHub access. Create the empty repository on GitHub first;
+the setup does not create one for you.
 
 ## What plugin-share does not do
 

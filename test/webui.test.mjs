@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BOOTSTRAP_KEY, ROUTE_PREFIX, registerWebUi, shareableLocalDir } from '../lib/webui.js';
+import { saveRepository } from '../lib/repositories.js';
 
 const TOKEN = 'test-token';
 
@@ -121,9 +122,9 @@ async function waitFor(predicate, tries = 60) {  for (let attempt = 0; attempt <
   throw new Error('the job never reached the expected state');
 }
 
-async function makeUi({ profileManifest, run }) {
+async function makeUi({ profileManifest, run, root, fetch }) {
   const { ctx, registered, taps } = makeCtx();
-  const { jobs } = registerWebUi(ctx, { profileManifest, run, token: TOKEN });
+  const { jobs } = registerWebUi(ctx, { profileManifest, run, root, fetch, token: TOKEN });
   return {
     jobs,
     registered,
@@ -131,14 +132,22 @@ async function makeUi({ profileManifest, run }) {
     plan: routeFor(registered, `${ROUTE_PREFIX}/plan`),
     publish: routeFor(registered, `${ROUTE_PREFIX}/publish`),
     status: routeFor(registered, `${ROUTE_PREFIX}/status`),
+    setup: routeFor(registered, `${ROUTE_PREFIX}/setup`),
+    connect: routeFor(registered, `${ROUTE_PREFIX}/github/connect`),
+    repository: routeFor(registered, `${ROUTE_PREFIX}/repository`),
+    share: routeFor(registered, `${ROUTE_PREFIX}/share`),
   };
 }
 
-test('three exact routes are registered and the page gets a bootstrap', async () => {
+test('guided sharing routes are registered and the page gets a bootstrap', async () => {
   const ui = await makeUi({ profileManifest: {} });
   assert.deepEqual(
     ui.registered.map((route) => [route.path, route.kind]),
     [
+      [`${ROUTE_PREFIX}/setup`, 'exact'],
+      [`${ROUTE_PREFIX}/github/connect`, 'exact'],
+      [`${ROUTE_PREFIX}/repository`, 'exact'],
+      [`${ROUTE_PREFIX}/share`, 'exact'],
       [`${ROUTE_PREFIX}/plan`, 'exact'],
       [`${ROUTE_PREFIX}/publish`, 'exact'],
       [`${ROUTE_PREFIX}/status`, 'exact'],
@@ -155,6 +164,59 @@ test('a request without the token is forbidden', async () => {
   const ui = await makeUi({ profileManifest: {} });
   assert.equal((await call(ui.plan, { body: '{}' })).status, 403);
   assert.equal((await call(ui.plan, { body: '{}', token: 'nope' })).status, 403);
+});
+
+test('setup reports the local plugin and whether GitHub is connected', async () => {
+  const dir = await makePluginDir();
+  const run = makeRun({ 'gh api user': { code: 0, stdout: 'nezumi0627\n', stderr: '' } });
+  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run });
+  const response = await call(ui.setup, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
+  assert.equal(response.status, 200);
+  assert.equal(response.payload.connection.login, 'nezumi0627');
+  assert.equal(response.payload.repository, undefined);
+});
+
+test('sharing requires a saved repository and never returns a GitHub token', async () => {
+  const dir = await makePluginDir();
+  const root = await mkdtemp(join(tmpdir(), 'plugin-share-webui-store-'));
+  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, root });
+  const response = await call(ui.share, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
+  assert.equal(response.status, 409);
+  assert.equal(response.payload.setupRequired, true);
+  assert.doesNotMatch(JSON.stringify(response.payload), /gh[pousr]_[A-Za-z0-9_]+/);
+});
+
+test('sharing blocks credential-bearing files before contacting GitHub', async () => {
+  const dir = await makePluginDir();
+  const credential = ['DATABASE_', 'PASSWORD=do-not-', 'send-this-secret-123456'].join('');
+  await writeFile(join(dir, 'config.env'), credential);
+  const root = await mkdtemp(join(tmpdir(), 'plugin-share-webui-store-'));
+  await saveRepository('x-demo', { owner: 'owner', repo: 'x-demo', url: 'https://github.com/owner/x-demo' }, { root });
+  const run = makeRun({ 'gh api user --jq .login': { code: 0, stdout: 'owner\n', stderr: '' } });
+  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run, root, fetch: async () => assert.fail('must not contact GitHub') });
+  const response = await call(ui.share, { token: TOKEN, body: JSON.stringify({ name: 'x-demo' }) });
+  assert.equal(response.status, 400);
+  assert.match(response.payload.error, /config\.env/);
+  assert.doesNotMatch(response.payload.error, /send-this-secret/);
+  assert.equal(run.calls.length, 0);
+});
+
+test('repository setup checks push permission and persists only the repository URL', async () => {
+  const dir = await makePluginDir();
+  const root = await mkdtemp(join(tmpdir(), 'plugin-share-webui-store-'));
+  const run = makeRun({ 'gh auth token': { code: 0, stdout: 'secret-token\n', stderr: '' } });
+  const fetch = async (_url, options) => {
+    assert.match(options.headers.authorization, /^Bearer secret-token$/);
+    return { ok: true, status: 200, json: async () => ({ permissions: { push: true }, private: false, default_branch: 'main' }) };
+  };
+  const ui = await makeUi({ profileManifest: { dependencies: { 'x-demo': `link:${dir}` } }, run, root, fetch });
+  const response = await call(ui.repository, { token: TOKEN, body: JSON.stringify({ name: 'x-demo', url: 'https://github.com/owner/x-demo' }) });
+  assert.equal(response.status, 200);
+  assert.equal(response.payload.repository.url, 'https://github.com/owner/x-demo');
+  assert.doesNotMatch(JSON.stringify(response.payload), /secret-token/);
+  const saved = await readFile(join(root, 'repositories.json'), 'utf8');
+  assert.match(saved, /https:\/\/github\.com\/owner\/x-demo/);
+  assert.doesNotMatch(saved, /secret-token/);
 });
 
 test('plan describes what a link-installed bundle would publish', async () => {

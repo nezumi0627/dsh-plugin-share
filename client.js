@@ -61,6 +61,10 @@
         return h('dl', { className: 'ps-facts' }, items);
       }
 
+      function friendInstructions(repoUrl) {
+        return `このDSHプラグインを確認してください:\n${repoUrl}\n\nまず plugin-share の inspect でプラグイン名・作者・SHA-256・依存関係を表示してください。インストールはまだせず、確認結果を私に見せてください。`;
+      }
+
       /** The Share button and its confirmation, progress, and result states. */
       function Action(props) {
         const subject = props ? props.subject : undefined;
@@ -76,7 +80,11 @@
         const [result, setResult] = React.useState(null);
         const [error, setError] = React.useState(null);
         const [visibility, setVisibility] = React.useState('public');
-        const timer = React.useRef(null);
+        const [jobId, setJobId] = React.useState(null);
+        const [copyStatus, setCopyStatus] = React.useState('');
+        const [setup, setSetup] = React.useState(null);
+        const [repoUrl, setRepoUrl] = React.useState('');
+        const [account, setAccount] = React.useState(null);
 
         const tr = (key, fallback) => {
           if (typeof t !== 'function') return fallback;
@@ -103,23 +111,66 @@
           return { ok: response.ok, status: response.status, payload };
         };
 
-        React.useEffect(() => {
-          if (bootstrap === undefined || name === undefined) return undefined;
-          let cancelled = false;
-          (async () => {
-            try {
-              const answer = await call('/plan', { name });
-              if (cancelled || !answer.ok || answer.payload?.plan === undefined) return;
-              setPlan(answer.payload.plan);
-            } catch {
-              // Leaving the button off the page is the right answer when the
-              // Host cannot say what would be published.
+        const openShare = async () => {
+          setError(null);
+          setPhase('setup-loading');
+          try {
+            const answer = await call('/setup', { name });
+            if (!answer.ok) throw new Error(answer.payload?.error ?? 'Could not load setup.');
+            setSetup(answer.payload);
+            setAccount(answer.payload.connection);
+            setRepoUrl(answer.payload.repository?.url ?? '');
+            setPhase(answer.payload.repository && answer.payload.connection ? 'ready' : 'setup');
+            if (answer.payload.repository && answer.payload.connection) void startQuickShare();
+          } catch (failure) {
+            setError(failure?.message ?? String(failure));
+            setPhase('error');
+          }
+        };
+
+        const connectGitHub = async () => {
+          setError(null);
+          setPhase('connecting');
+          try {
+            const answer = await call('/github/connect', {});
+            if (!answer.ok || !answer.payload?.id) throw new Error(answer.payload?.error ?? 'Could not start GitHub sign-in.');
+            setJobId(answer.payload.id);
+          } catch (failure) {
+            setError(failure?.message ?? String(failure));
+            setPhase('setup');
+          }
+        };
+
+        const saveRepository = async () => {
+          setError(null);
+          setPhase('saving-repository');
+          try {
+            const answer = await call('/repository', { name, url: repoUrl });
+            if (!answer.ok) throw new Error(answer.payload?.error ?? 'Could not save repository.');
+            setSetup((previous) => ({ ...previous, repository: answer.payload.repository }));
+            void startQuickShare();
+          } catch (failure) {
+            setError(failure?.message ?? String(failure));
+            setPhase('setup');
+          }
+        };
+
+        const startQuickShare = async () => {
+          setError(null);
+          setStage('準備中');
+          setPhase('working');
+          try {
+            const accepted = await call('/share', { name });
+            if (!accepted.ok || !accepted.payload?.id) {
+              if (accepted.payload?.setupRequired) { setPhase('setup'); return; }
+              throw new Error(accepted.payload?.error ?? `share failed (${accepted.status})`);
             }
-          })();
-          return () => {
-            cancelled = true;
-          };
-        }, [bootstrap === undefined ? '' : bootstrap.token, name]);
+            setJobId(accepted.payload.id);
+          } catch (failure) {
+            setError(failure?.message ?? String(failure));
+            setPhase('error');
+          }
+        };
 
         const startPublish = async () => {
           setError(null);
@@ -137,44 +188,96 @@
               setPhase('error');
               return;
             }
-            timer.current = setInterval(async () => {
-              try {
-                const answer = await call('/status', { id: accepted.payload.id });
-                const job = answer.payload ?? {};
-                if (job.stage === 'done') {
-                  clearInterval(timer.current);
-                  timer.current = null;
-                  setResult(job.result ?? {});
-                  setPhase('done');
-                  return;
-                }
-                if (job.stage === 'error') {
-                  clearInterval(timer.current);
-                  timer.current = null;
-                  setError(job.error ?? 'publishing failed');
-                  setPhase('error');
-                  return;
-                }
-                setStage(typeof job.stage === 'string' ? job.stage : 'working');
-              } catch {
-                // A failed poll is retried on the next tick.
-              }
-            }, 1000);
+            setJobId(accepted.payload.id);
           } catch (failure) {
             setError(failure && failure.message ? failure.message : String(failure));
             setPhase('error');
           }
         };
 
+        const copyFriendInstructions = async () => {
+          try {
+            if (typeof navigator === 'undefined' || typeof navigator.clipboard?.writeText !== 'function') {
+              throw new Error('clipboard unavailable');
+            }
+            await navigator.clipboard.writeText(friendInstructions(result.repoHtmlUrl));
+            setCopyStatus('copied');
+          } catch {
+            setCopyStatus('failed');
+          }
+        };
+
+        // The status poll is an effect, not a timer started in the click handler:
+        // the Plugins page can unmount this panel mid-publish, and a timer with no
+        // effect-level owner keeps polling until the page reloads. Leaving the
+        // 'working' phase ends it too.
+        React.useEffect(() => {
+          if ((phase !== 'working' && phase !== 'connecting') || jobId === null) return undefined;
+          let cancelled = false;
+          const timer = setInterval(async () => {
+            // The publish job runs on the Host whether or not this window is on
+            // screen, so a hidden document has nothing to poll for.
+            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+            try {
+              const answer = await call('/status', { id: jobId });
+              if (cancelled) return;
+              const job = answer.payload ?? {};
+              if (job.stage === 'done' && job.connection) {
+                setAccount(job.connection);
+                setJobId(null);
+                setPhase('setup');
+                return;
+              }
+              if (job.stage === 'done') {
+                setResult(job.result ?? {});
+                setPhase('done');
+                return;
+              }
+              if (job.stage === 'error') {
+                setError(job.error ?? 'publishing failed');
+                setPhase(phase === 'connecting' ? 'setup' : 'error');
+                setJobId(null);
+                return;
+              }
+              setStage(typeof job.stage === 'string' ? job.stage : 'working');
+            } catch {
+              // A failed poll is retried on the next tick.
+            }
+          }, 1000);
+          return () => {
+            cancelled = true;
+            clearInterval(timer);
+          };
+          // `call` closes over the page bootstrap only, which cannot change while
+          // this panel is mounted.
+        }, [phase, jobId]);
+
         if (bootstrap === undefined || name === undefined) return null;
-        if (phase === 'idle' && plan === null) return null;
 
         if (phase === 'idle') {
           return h(
             'div',
             { className: 'ps-row' },
-            h('button', { type: 'button', className: 'ps-button', onClick: () => setPhase('confirm') }, tr('pluginShare.share', 'Share')),
-            h('span', { className: 'ps-hint' }, `${plan.name}@${plan.version}`),
+            h('button', { type: 'button', className: 'ps-button', onClick: () => void openShare() }, tr('pluginShare.share', 'Share')),
+            h('span', { className: 'ps-hint' }, name),
+          );
+        }
+        if (phase === 'setup-loading' || phase === 'saving-repository') return h('div', { className: 'ps-panel', role: 'status' }, phase === 'setup-loading' ? '設定を確認しています…' : 'リポジトリを確認して保存しています…');
+        if (phase === 'setup' || phase === 'connecting' || phase === 'ready') {
+          return h('div', { className: 'ps-panel' },
+            h('div', { className: 'ps-title' }, 'GitHub共有のセットアップ'),
+            h('div', null, '1. GitHubを連携'),
+            account
+              ? h('div', { className: 'ps-hint', role: 'status' }, `接続済み: ${account.login}`)
+              : h('button', { type: 'button', className: 'ps-button', onClick: () => void connectGitHub() }, phase === 'connecting' ? 'ブラウザーで認証中…' : 'GitHubに接続'),
+            phase === 'connecting' ? h('span', { className: 'ps-hint' }, 'ブラウザーが開きます。表示された認証コードを入力して完了するまでお待ちください。') : null,
+            h('div', null, '2. GitHubで空のリポジトリを手動作成し、URLを入力'),
+            h('input', { type: 'url', value: repoUrl, placeholder: 'https://github.com/owner/repo', onChange: (event) => setRepoUrl(event.target.value), 'aria-label': 'GitHub repository URL' }),
+            h('button', { type: 'button', className: 'ps-button', disabled: !account || repoUrl.trim() === '', onClick: () => void saveRepository() }, '保存して共有'),
+            setup?.repository?.private ? h('span', { className: 'ps-hint' }, 'このリポジトリはPrivateです。友だちにも閲覧権限が必要です。') : null,
+            setup?.repository && account ? h('button', { type: 'button', className: 'ps-button', onClick: () => void startQuickShare() }, '共有する') : null,
+            error ? h('span', { className: 'ps-error', role: 'alert' }, error) : null,
+            h('button', { type: 'button', className: 'ps-button', onClick: () => { setPhase('idle'); setJobId(null); } }, '閉じる'),
           );
         }
         if (phase === 'confirm') {
@@ -222,13 +325,22 @@
           return h('div', { className: 'ps-panel' }, h('div', { className: 'ps-title' }, tr('pluginShare.working', 'Publishing…')), h('span', { className: 'ps-hint' }, stage));
         }
         if (phase === 'done') {
+          const friendMessage = friendInstructions(result.repoHtmlUrl);
           return h(
             'div',
             { className: 'ps-panel' },
-            h('div', { className: 'ps-title' }, tr('pluginShare.done', 'Published')),
+            h('div', { className: 'ps-title' }, result.unchanged ? '変更はありません' : result.updated ? '共有内容を更新しました' : tr('pluginShare.done', 'Published')),
             h('div', { className: 'ps-code' }, result.repoHtmlUrl ?? ''),
             h('div', { className: 'ps-code' }, result.artifactUrl ?? ''),
             h('div', { className: 'ps-hint' }, tr('pluginShare.install', 'Anyone can install it with plugin-share from that repository URL.')),
+            h('button', { type: 'button', className: 'ps-button', onClick: () => void copyFriendInstructions() }, '友だちに送る文面をコピー'),
+            copyStatus === 'copied' ? h('span', { className: 'ps-hint', role: 'status' }, 'コピーしました') : null,
+            copyStatus === 'failed'
+              ? h('label', null,
+                  h('span', { className: 'ps-hint' }, 'コピーできませんでした。下の文面を手動でコピーしてください。'),
+                  h('textarea', { readOnly: true, value: friendMessage, 'aria-label': '友だちに送る文面' }),
+                )
+              : null,
           );
         }
         return h(
