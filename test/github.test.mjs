@@ -6,6 +6,159 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { collectEntries } from '../lib/pack.js';
 import { githubIdentity, parseGitHubRepositoryUrl, publishToGitHub, validateGitHubRepository } from '../lib/github.js';
+import { catalogReleaseTag } from '../lib/catalog.js';
+
+function catalogApi() {
+  const blobs = new Map();
+  const trees = new Map();
+  const commits = new Map();
+  const releases = new Map();
+  const assetBytes = new Map();
+  const writes = [];
+  let branch;
+  let next = 0;
+  const response = (body, status = 200) => new Response(JSON.stringify(body), { status });
+  const fetchImpl = async (input, init = {}) => {
+    const url = new URL(input);
+    const method = init.method ?? 'GET';
+    const path = url.pathname.replace(/^\/repos\/ren\/catalog/, '');
+    if (method !== 'GET') writes.push(`${method} ${path}`);
+    if (url.hostname === 'uploads.github.com') {
+      const id = Number(url.pathname.match(/releases\/(\d+)/)?.[1]);
+      const release = [...releases.values()].find((item) => item.id === id);
+      const name = url.searchParams.get('name');
+      const assetId = ++next;
+      const bytes = Buffer.from(init.body);
+      assetBytes.set(assetId, bytes);
+      release.assets.push({ id: assetId, name, size: bytes.length, url: `https://api.github.com/repos/ren/catalog/releases/assets/${assetId}` });
+      return response({ name }, 201);
+    }
+    const assetRoute = path.match(/^\/releases\/assets\/(\d+)$/);
+    if (assetRoute && method === 'GET') return new Response(assetBytes.get(Number(assetRoute[1])), { status: 200 });
+    if (path === '' && method === 'GET') return response({ permissions: { push: true }, default_branch: 'main', private: false });
+    if (path.startsWith('/releases/tags/') && method === 'GET') {
+      const tag = decodeURIComponent(path.slice('/releases/tags/'.length));
+      const release = releases.get(tag);
+      return release ? response(release) : response({ message: 'Not Found' }, 404);
+    }
+    if (path.startsWith('/git/ref/tags/') && method === 'GET') return response({ message: 'Not Found' }, 404);
+    if (path === '/git/ref/heads/main' && method === 'GET') return branch ? response({ object: { sha: branch } }) : response({ message: 'Not Found' }, 404);
+    if (path.startsWith('/git/commits/') && method === 'GET') return response({ tree: { sha: commits.get(decodeURIComponent(path.slice('/git/commits/'.length))) } });
+    if (path.startsWith('/git/trees/') && method === 'GET') {
+      const sha = decodeURIComponent(path.slice('/git/trees/'.length).split('?')[0]);
+      return response({ tree: [...(trees.get(sha) ?? new Map())].map(([entryPath, blobSha]) => ({ path: entryPath, type: 'blob', sha: blobSha })) });
+    }
+    if (path.startsWith('/git/blobs/') && method === 'GET') return response({ encoding: 'base64', content: blobs.get(decodeURIComponent(path.slice('/git/blobs/'.length))).toString('base64') });
+    if (path === '/git/blobs' && method === 'POST') {
+      const body = JSON.parse(init.body);
+      const sha = `blob-${++next}`;
+      blobs.set(sha, Buffer.from(body.content, body.encoding));
+      return response({ sha }, 201);
+    }
+    if (path === '/git/trees' && method === 'POST') {
+      const body = JSON.parse(init.body);
+      const map = new Map(body.base_tree ? trees.get(body.base_tree) : []);
+      for (const item of body.tree) map.set(item.path, item.sha);
+      const sha = `tree-${++next}`;
+      trees.set(sha, map);
+      return response({ sha }, 201);
+    }
+    if (path === '/git/commits' && method === 'POST') {
+      const body = JSON.parse(init.body);
+      const sha = `commit-${++next}`;
+      commits.set(sha, body.tree);
+      return response({ sha }, 201);
+    }
+    if (path === '/git/refs' && method === 'POST') {
+      branch = JSON.parse(init.body).sha;
+      return response({ ref: 'refs/heads/main' }, 201);
+    }
+    if (path === '/git/ref/heads/main' && method === 'PATCH') {
+      branch = JSON.parse(init.body).sha;
+      return response({ ref: 'refs/heads/main' });
+    }
+    if (path === '/releases' && method === 'POST') {
+      const body = JSON.parse(init.body);
+      const release = { id: ++next, tag_name: body.tag_name, draft: true, html_url: `https://github.com/ren/catalog/releases/tag/${body.tag_name}`, upload_url: `https://uploads.github.com/repos/ren/catalog/releases/${next}/assets{?name,label}`, assets: [] };
+      releases.set(body.tag_name, release);
+      return response(release, 201);
+    }
+    const patchRelease = path.match(/^\/releases\/(\d+)$/);
+    if (patchRelease && method === 'PATCH') {
+      const release = [...releases.values()].find((item) => item.id === Number(patchRelease[1]));
+      Object.assign(release, JSON.parse(init.body));
+      return response(release);
+    }
+    assert.fail(`unexpected ${method} ${url.href}`);
+  };
+  return { fetchImpl, writes, blobs, trees, commits, releases, assetBytes };
+}
+
+test('shared catalog publishes two same-version plugins, preserves the index, and repeats idempotently', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-catalog-github-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await writeFile(join(dir, 'package.json'), '{"name":"demo","version":"1.0.0"}');
+  await writeFile(join(dir, 'index.js'), 'export const value = true;');
+  const assetPath = join(dir, 'demo.tgz');
+  await writeFile(assetPath, 'plugin asset one');
+  const repo = { owner: 'ren', repo: 'catalog', url: 'https://github.com/ren/catalog' };
+  const remote = catalogApi();
+  const originalDigest = createHash('sha256').update('plugin asset one').digest('hex');
+  const makePlan = async (name, summary, asset, digest) => ({
+    dir, name, version: '1.0.0', summary, tag: catalogReleaseTag(name, '1.0.0'), releaseName: `${name} 1.0.0`, notes: summary,
+    tarballPath: assetPath, tarballBytes: Buffer.byteLength(asset), sha256: digest,
+    artifactUrl: `https://github.com/ren/catalog/releases/download/${catalogReleaseTag(name, '1.0.0')}/${name}-1.0.0-${digest.slice(0, 16)}.tgz`,
+  });
+  const first = await makePlan('demo', 'first plugin', 'plugin asset one', originalDigest);
+  const firstResult = await publishToGitHub(first, repo, { token: 'token', fetchImpl: remote.fetchImpl, catalogMode: true });
+  assert.match(firstResult.catalogUrl, /blob\/main\/README\.md$/);
+
+  const second = await makePlan('other', 'second plugin', 'plugin asset one', originalDigest);
+  await publishToGitHub(second, repo, { token: 'token', fetchImpl: remote.fetchImpl, catalogMode: true });
+  const latestCommit = [...remote.commits.keys()].at(-1);
+  const catalogTree = remote.trees.get(remote.commits.get(latestCommit));
+  const catalog = JSON.parse(remote.blobs.get(catalogTree.get('catalog.json')).toString('utf8'));
+  assert.deepEqual(catalog.plugins.map((entry) => entry.name), ['demo', 'other']);
+  assert.notEqual(first.tag, second.tag);
+  const writesBeforeRepeat = remote.writes.length;
+  const repeated = await publishToGitHub(second, repo, { token: 'token', fetchImpl: remote.fetchImpl, catalogMode: true });
+  assert.equal(repeated.unchanged, true);
+  assert.equal(remote.writes.length, writesBeforeRepeat);
+  const secondAsset = remote.releases.get(second.tag).assets[0];
+  remote.assetBytes.set(secondAsset.id, Buffer.from('tampered asset!!'));
+  await assert.rejects(publishToGitHub(second, repo, { token: 'token', fetchImpl: remote.fetchImpl, catalogMode: true }), /does not match the confirmed SHA-256/);
+  assert.equal(remote.writes.length, writesBeforeRepeat);
+
+  await writeFile(assetPath, 'changed asset bytes');
+  const changedDigest = createHash('sha256').update('changed asset bytes').digest('hex');
+  const changed = { ...first, tarballBytes: Buffer.byteLength('changed asset bytes'), sha256: changedDigest, artifactUrl: `https://github.com/ren/catalog/releases/download/${first.tag}/demo-1.0.0-${changedDigest.slice(0, 16)}.tgz` };
+  const changedResult = await publishToGitHub(changed, repo, { token: 'token', fetchImpl: remote.fetchImpl, catalogMode: true });
+  assert.equal(changedResult.updated, true);
+  const finalCommit = [...remote.commits.keys()].at(-1);
+  const finalTree = remote.trees.get(remote.commits.get(finalCommit));
+  const finalCatalog = JSON.parse(remote.blobs.get(finalTree.get('catalog.json')).toString('utf8'));
+  assert.deepEqual(finalCatalog.plugins.map((entry) => entry.name), ['demo', 'other']);
+  assert.equal(finalCatalog.plugins[0].sha256, changedDigest);
+  const readme = remote.blobs.get(finalTree.get('README.md')).toString('utf8');
+  assert.match(readme, /first plugin|first plugin/);
+  assert.match(readme, /second plugin/);
+});
+
+test('shared catalog refuses bytes that no longer match the confirmed digest before any write', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-catalog-digest-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await writeFile(join(dir, 'package.json'), '{"name":"demo","version":"1.0.0"}');
+  const assetPath = join(dir, 'demo.tgz');
+  await writeFile(assetPath, 'different bytes');
+  const remote = catalogApi();
+  await assert.rejects(publishToGitHub({
+    dir, name: 'demo', version: '1.0.0', summary: 'demo', tag: 'demo-v1.0.0', sha256: 'a'.repeat(64),
+    tarballPath: assetPath, artifactUrl: 'https://github.com/ren/catalog/releases/download/demo-v1.0.0/demo.tgz',
+  }, { owner: 'ren', repo: 'catalog', url: 'https://github.com/ren/catalog' }, {
+    token: 'token', fetchImpl: remote.fetchImpl, catalogMode: true,
+  }), /changed after confirmation/);
+  assert.deepEqual(remote.writes, []);
+});
 
 test('repository URLs accept only a GitHub owner and repository', () => {
   assert.deepEqual(parseGitHubRepositoryUrl('https://github.com/ren/plugin'), {
