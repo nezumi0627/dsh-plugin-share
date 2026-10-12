@@ -60,7 +60,7 @@ function makeCtx({ services = ['tools', 'pluginManager', 'webServer'], mode = 'd
   return { ctx, state };
 }
 
-test('apply registers the plugin_share tool and the three share routes', async () => {
+test('apply registers the plugin_share tool and guided share routes', async () => {
   const { ctx, state } = makeCtx();
   const root = await mkdtemp(join(tmpdir(), 'plugin-share-host-'));
   process.env.DSH_PLUGIN_SHARE_HOME = root;
@@ -72,7 +72,7 @@ test('apply registers the plugin_share tool and the three share routes', async (
   assert.equal(typeof tool.output.render, 'function');
   assert.deepEqual(
     state.routes.map((route) => route.path),
-    ['/plugin-share/plan', '/plugin-share/publish', '/plugin-share/status'],
+    ['/plugin-share/setup', '/plugin-share/github/connect', '/plugin-share/repository', '/plugin-share/share', '/plugin-share/plan', '/plugin-share/publish', '/plugin-share/status'],
   );
   assert.equal(state.routes.every((route) => route.kind === 'exact'), true);
   const html = state.taps[0]('<html><head></head><body></body></html>');
@@ -91,7 +91,7 @@ test('a profile without the plugin manager service still gets the share routes',
   const { ctx, state } = makeCtx({ services: ['webServer'] });
   apply(ctx);
   assert.equal(state.tools.length, 0);
-  assert.equal(state.routes.length, 3);
+  assert.equal(state.routes.length, 7);
 });
 
 test('the tool lists and removes against the adapter it was given', async () => {
